@@ -1,0 +1,8 @@
+.runtime/
+Desktop/
+windows/bin/
+windows/obj/
+ios/build/
+ios/CellRelay.xcodeproj/
+ios/Info.plist
+.DS_Store

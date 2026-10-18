@@ -1,0 +1,191 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+
+namespace CellRelay;
+
+static class Program
+{
+    [STAThread] static void Main(string[] args)
+    {
+        if (args.Contains("--self-test")) { try { SelfTest.Run().GetAwaiter().GetResult(); Environment.Exit(0); } catch (Exception e) { File.WriteAllText("self-test-result.txt", e.ToString()); Environment.Exit(1); } return; }
+        ApplicationConfiguration.Initialize(); Application.Run(new MainForm());
+    }
+}
+
+sealed class MainForm : Form
+{
+    readonly TextBox host = new() { Text = "172.20.10.1", Width = 210 };
+    readonly TextBox token = new() { Width = 350, UseSystemPasswordChar = true };
+    readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
+    readonly Button start = new() { Text = "중계 시작", AutoSize = true };
+    readonly Button stop = new() { Text = "중지", Enabled = false, AutoSize = true };
+    readonly Button diagnose = new() { Text = "아이폰 연결 검사", AutoSize = true };
+    readonly NumericUpDown proxyPort = new() { Minimum = 1024, Maximum = 65535, Value = 8877, Width = 100 };
+    readonly TextBox profileInput = new() { Width = 320, PlaceholderText = "아이폰에서 복사한 CR1: 연결 정보", UseSystemPasswordChar = true };
+    readonly Button import = new() { Text = "연결 정보 적용", AutoSize = true };
+    readonly Label proxyHint = new() { AutoSize = true };
+    readonly CancellationTokenSource closing = new();
+    long lastUp, lastDown;
+    readonly Label statistics = new() { AutoSize = true, MaximumSize = new Size(710, 0), Text = "대기 중" };
+    readonly System.Windows.Forms.Timer refresh = new() { Interval = 1000 };
+    Proxy? proxy;
+    public MainForm()
+    {
+        Text = "CellRelay 0.3 · iPhone 셀룰러 중계 테스트"; Width = 780; Height = 640; MinimumSize = new Size(760, 600);
+        var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort;
+        var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 340, AutoScroll = true, Padding = new Padding(12), FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
+        panel.Controls.Add(new Label { Text = "아이폰 주소 (아이폰 앱 포트: 49152)", AutoSize = true }); panel.Controls.Add(host);
+        panel.Controls.Add(new Label { Text = "아이폰 앱에 표시된 연결 키", AutoSize = true }); panel.Controls.Add(token);
+        var buttons = new FlowLayoutPanel { AutoSize = true }; buttons.Controls.AddRange([start, stop, diagnose]); panel.Controls.Add(buttons);
+        var portRow = new FlowLayoutPanel { AutoSize = true }; portRow.Controls.AddRange([new Label { Text = "PC 프록시 포트", AutoSize = true }, proxyPort]); panel.Controls.Add(portRow);
+        panel.Controls.Add(proxyHint);
+        panel.Controls.Add(statistics);
+        var tools = new FlowLayoutPanel { AutoSize = true };
+        var copyProxy = new Button { Text = "프록시 주소 복사", AutoSize = true }; var export = new Button { Text = "진단 기록 저장", AutoSize = true }; var clear = new Button { Text = "기록 지우기", AutoSize = true };
+        tools.Controls.AddRange([copyProxy, export, clear]); panel.Controls.Add(tools);
+        void Hint() => proxyHint.Text = $"브라우저 HTTP/HTTPS 프록시: 127.0.0.1:{proxyPort.Value} · 시스템 설정은 직접 변경";
+        Hint(); proxyPort.ValueChanged += (_, _) => Hint();
+        copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
+        clear.Click += (_, _) => log.Clear();
+        import.Click += (_, _) => { try { var profile = ConnectionProfile.Parse(profileInput.Text); host.Text = profile.Host; token.Text = profile.Token; profileInput.Clear(); Log("연결 정보를 적용했습니다. 아직 연결하지 않았습니다."); } catch (FormatException e) { MessageBox.Show(e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.3 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        Controls.Add(log); Controls.Add(panel);
+        start.Click += (_, _) => {
+            if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
+            try { proxy = new Proxy(host.Text.Trim(), 49152, token.Text.Trim(), (int)proxyPort.Value, Log); proxy.Start(); lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("시작됨. 아이폰 앱을 화면에 켜 두세요. 공유 데이터 미차감은 검증되지 않았습니다."); }
+            catch (Exception e) { proxy?.Dispose(); proxy = null; Log(e.Message); }
+        };
+        stop.Click += (_, _) => Stop(); FormClosing += (_, _) => { closing.Cancel(); refresh.Stop(); refresh.Dispose(); proxy?.Dispose(); };
+        diagnose.Click += async (_, _) => {
+            if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) { MessageBox.Show("아이폰 주소와 앱의 32자리 연결 키를 먼저 입력하세요."); return; }
+            diagnose.Enabled = false;
+            try {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(closing.Token); timeout.CancelAfter(TimeSpan.FromSeconds(10)); using var phone = new TcpClient();
+                var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                await phone.ConnectAsync(host.Text.Trim(), 49152, timeout.Token); var stream = phone.GetStream();
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { token = token.Text.Trim(), host = "example.com", port = 443 }) + "\n"), timeout.Token);
+                var result = await Proxy.ReadLine(stream, timeout.Token);
+                Log(result == "OK" ? $"검사 성공 ({elapsed.ElapsedMilliseconds} ms): 아이폰 인증 및 example.com:443 셀룰러 TCP 연결. 데이터 차감 결과는 별도 확인하세요." : "검사 거절: " + result);
+            } catch (Exception e) when (e is SocketException or IOException or OperationCanceledException) { Log("검사 실패: " + (e is OperationCanceledException ? "10초 응답 시간 초과" : e.Message)); }
+            finally { if (!IsDisposed) diagnose.Enabled = true; }
+        };
+        refresh.Tick += (_, _) => { if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
+    }
+    void Stop() { var final = proxy?.Summary; proxy?.Dispose(); proxy = null; start.Enabled = true; stop.Enabled = false; host.Enabled = token.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = true; statistics.Text = "중지됨"; Log("중지됨 · " + final); }
+    void Log(string s) { if (IsDisposed || !IsHandleCreated) return; try { BeginInvoke(new Action(() => { if (IsDisposed) return; if (log.TextLength > 32000) log.Text = log.Text[^16000..]; log.AppendText($"{DateTime.Now:HH:mm:ss} {s}\r\n"); })); } catch (InvalidOperationException) { } }
+}
+
+sealed class Proxy(string phone, int phonePort, string token, int port, Action<string> log, TimeSpan? idleTimeout = null) : IDisposable
+{
+    readonly CancellationTokenSource shutdown = new();
+    readonly TcpListener listener = new(IPAddress.Loopback, port);
+    readonly SemaphoreSlim capacity = new(32);
+    long uploaded, downloaded, failures;
+    int active, disposed;
+    public int Active => Volatile.Read(ref active);
+    public long Uploaded => Interlocked.Read(ref uploaded);
+    public long Downloaded => Interlocked.Read(ref downloaded);
+    public string Summary => $"연결 {Active}/32 · 업로드 {Interlocked.Read(ref uploaded):N0} B · 다운로드 {Interlocked.Read(ref downloaded):N0} B · 오류 {Interlocked.Read(ref failures)}";
+    public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
+    public void Start() { listener.Start(); _ = Accept(); }
+    async Task Accept()
+    {
+        try { while (!shutdown.IsCancellationRequested) { var client = await listener.AcceptTcpClientAsync(shutdown.Token); if (!capacity.Wait(0)) { client.Dispose(); continue; } _ = Handle(client); } }
+        catch (OperationCanceledException) { } catch (ObjectDisposedException) when (shutdown.IsCancellationRequested) { }
+        catch (SocketException e) { if (!shutdown.IsCancellationRequested) log("수신 오류: " + e.Message); }
+    }
+    async Task Handle(TcpClient client)
+    {
+        Interlocked.Increment(ref active);
+        using (client)
+        using (var remote = new TcpClient())
+        using (var session = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token))
+        {
+            bool committed = false;
+            try
+            {
+                session.CancelAfter(TimeSpan.FromSeconds(20)); var ct = session.Token;
+                var local = client.GetStream(); var header = await ReadHeader(local, ct);
+                var plan = RequestPlan.Parse(header); var target = plan.Host; var targetPort = plan.Port;
+                client.NoDelay = remote.NoDelay = true;
+                await remote.ConnectAsync(phone, phonePort, ct); var bridge = remote.GetStream();
+                await bridge.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { token, host = target, port = targetPort }) + "\n"), ct);
+                var response = await ReadLine(bridge, ct);
+                if (response != "OK") throw new IOException("아이폰 중계 거절: " + response);
+                if (plan.Tunnel) { await local.WriteAsync("HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray(), ct); committed = true; }
+                else { await bridge.WriteAsync(plan.Initial!, ct); Interlocked.Add(ref uploaded, plan.Initial!.Length); committed = true; }
+                log($"연결: {target}:{targetPort}"); session.CancelAfter(idleTimeout ?? TimeSpan.FromMinutes(2));
+                async Task Transfer(Stream from, Stream to, Socket destination, bool upload) {
+                    try { await Pump(from, to, destination, ct, count => { if (upload) Interlocked.Add(ref uploaded, count); else Interlocked.Add(ref downloaded, count); session.CancelAfter(idleTimeout ?? TimeSpan.FromMinutes(2)); }); }
+                    catch { session.Cancel(); throw; }
+                }
+                var up = Transfer(local, bridge, remote.Client, true); var down = Transfer(bridge, local, client.Client, false);
+                await Task.WhenAll(up, down);
+            }
+            catch (Exception e) when (e is IOException or SocketException or OperationCanceledException or ObjectDisposedException)
+            {
+                if (!shutdown.IsCancellationRequested) { Interlocked.Increment(ref failures); log("연결 종료: " + (e is OperationCanceledException ? "응답 대기 또는 유휴 시간 초과" : e.Message)); }
+                int status = e is RequestError bad ? bad.Status : e is OperationCanceledException ? 504 : 502;
+                if (!committed && !shutdown.IsCancellationRequested) { try { using var timeout = new CancellationTokenSource(1000); await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Error\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"), timeout.Token); } catch { } }
+            }
+            finally { session.Cancel(); Interlocked.Decrement(ref active); capacity.Release(); }
+        }
+    }
+    static async Task Pump(Stream from, Stream to, Socket socket, CancellationToken ct, Action<int> activity)
+    {
+        try { byte[] buffer = new byte[65536]; int count; while ((count = await from.ReadAsync(buffer, ct)) > 0) { activity(count); await to.WriteAsync(buffer.AsMemory(0, count), ct); activity(0); } try { socket.Shutdown(SocketShutdown.Send); } catch (SocketException) { } }
+        catch { try { socket.Dispose(); } catch { } throw; }
+    }
+    internal static async Task<string> ReadLine(Stream stream, CancellationToken ct)
+    {
+        var bytes = new List<byte>(); byte[] one = new byte[1];
+        while (bytes.Count < 8192) { if (await stream.ReadAsync(one, ct) == 0) throw new IOException("중계 응답 없음"); if (one[0] == 10) return Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\r'); bytes.Add(one[0]); }
+        throw new IOException("응답 헤더가 너무 큽니다");
+    }
+    internal static async Task<string> ReadHeader(Stream stream, CancellationToken ct)
+    {
+        var bytes = new List<byte>(); byte[] one = new byte[1];
+        while (bytes.Count < 32768) { if (await stream.ReadAsync(one, ct) == 0) throw new IOException("요청 중단"); bytes.Add(one[0]); int n = bytes.Count; if (n >= 4 && bytes[n-4] == 13 && bytes[n-3] == 10 && bytes[n-2] == 13 && bytes[n-1] == 10) return Encoding.Latin1.GetString(bytes.ToArray()); }
+        throw new RequestError(431, "요청 헤더가 너무 큽니다");
+    }
+    public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) != 0) return; shutdown.Cancel(); listener.Stop(); }
+}
+
+static class SelfTest
+{
+    public static async Task Run()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20)); var ct = deadline.Token;
+        var fake = new TcpListener(IPAddress.Loopback, 0); fake.Start();
+        try
+        {
+            var server = Task.Run(async () => {
+                for (int i = 0; i < 4; i++) {
+                    using var c = await fake.AcceptTcpClientAsync(ct); var s = c.GetStream(); var line = await Proxy.ReadLine(s, ct);
+                    using var doc = JsonDocument.Parse(line); if (doc.RootElement.GetProperty("token").GetString() != "0123456789abcdef") throw new Exception("Token mismatch");
+                    if (doc.RootElement.GetProperty("host").GetString() != "example.com") throw new Exception("Host mismatch");
+                    if (i == 2) { await s.WriteAsync("ERR authentication\n"u8.ToArray(), ct); continue; }
+                    await s.WriteAsync("OK\n"u8.ToArray(), ct);
+                    if (i is 0 or 3) { byte[] b = new byte[4]; await s.ReadExactlyAsync(b, ct); await s.WriteAsync(b, ct); }
+                    else { var h = await Proxy.ReadHeader(s, ct); if (!h.StartsWith("GET /probe?q=1 HTTP/1.1\r\n") || h.Contains("Proxy-Authorization")) throw new Exception("HTTP rewrite failed"); await s.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nTEST"u8.ToArray(), ct); }
+                }
+            }, ct);
+            using var p = new Proxy("127.0.0.1", ((IPEndPoint)fake.LocalEndpoint).Port, "0123456789abcdef", 0, _ => {}); p.Start();
+            for (int i = 0; i < 4; i++) {
+                using var c = new TcpClient(); await c.ConnectAsync(IPAddress.Loopback, p.Port, ct); var s = c.GetStream();
+                string req = i == 1 ? "GET http://example.com/probe?q=1 HTTP/1.1\r\nProxy-Authorization: secret\r\n\r\n" : "CONNECT example.com:443 HTTP/1.1\r\n\r\n";
+                await s.WriteAsync(Encoding.ASCII.GetBytes(req), ct); var h = await Proxy.ReadHeader(s, ct);
+                if (i == 2) { if (!h.StartsWith("HTTP/1.1 502")) throw new Exception("Authentication failure not propagated"); }
+                else { if (!h.StartsWith("HTTP/1.1 200")) throw new Exception("Proxy response failed"); if (i is 0 or 3) await s.WriteAsync("TEST"u8.ToArray(), ct); byte[] b = new byte[4]; await s.ReadExactlyAsync(b, ct); if (Encoding.ASCII.GetString(b) != "TEST") throw new Exception("Relay corruption"); }
+            }
+            await server;
+            await StabilityTests.Run();
+            FeatureTests.Run();
+            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback. iOS/device/carrier behavior NOT tested.");
+        }
+        finally { fake.Stop(); }
+    }
+}
