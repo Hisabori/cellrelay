@@ -79,7 +79,7 @@ sealed class MainForm : Form
                 var result = await Proxy.ReadLine(stream, timeout.Token);
                 if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: " + (result == "OK" ? $"성공 · {elapsed.ElapsedMilliseconds} ms" : "거절 · 아이폰 앱 상태 확인");
                 Log(result == "OK" ? $"검사 성공 ({elapsed.ElapsedMilliseconds} ms): 아이폰 인증 및 example.com:443 셀룰러 TCP 연결. 데이터 차감 결과는 별도 확인하세요." : "검사 거절: " + result);
-            } catch (Exception e) when (e is SocketException or IOException or OperationCanceledException) { Log("검사 실패: " + (e is OperationCanceledException ? "10초 응답 시간 초과" : e.Message)); }
+            } catch (Exception e) when (e is SocketException or IOException or OperationCanceledException) { if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: 실패 · 아이폰 앱과 주소를 확인하세요"; Log("검사 실패: " + (e is OperationCanceledException ? "10초 응답 시간 초과" : e.Message)); }
             finally { if (!IsDisposed) diagnose.Enabled = true; }
         };
         refresh.Tick += (_, _) => { if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
