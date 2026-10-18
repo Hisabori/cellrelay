@@ -26,7 +26,7 @@ sealed class MainForm : Form
     readonly Button diagnose = new() { Text = "아이폰 연결 검사", AutoSize = true };
     readonly NumericUpDown proxyPort = new() { Minimum = 1024, Maximum = 65535, Value = 8877, Width = 100 };
     readonly NumericUpDown phonePort = new() { Minimum = 1024, Maximum = 65535, Value = 49152, Width = 100 };
-    readonly TextBox profileInput = new() { Width = 320, PlaceholderText = "아이폰에서 복사한 CR1: 연결 정보", UseSystemPasswordChar = true };
+    readonly TextBox profileInput = new() { Width = 420, PlaceholderText = "CR1:로 시작하는 연결 코드 전체", UseSystemPasswordChar = true };
     readonly Button import = new() { Text = "연결 정보 적용", AutoSize = true };
     readonly Label proxyHint = new() { AutoSize = true };
     readonly Label phoneStatus = new() { AutoSize = true, Text = "아이폰 연결: 아직 검사하지 않음" };
@@ -37,13 +37,16 @@ sealed class MainForm : Form
     Proxy? proxy;
     public MainForm()
     {
-        Text = "CellRelay 0.4.2 · PC 연결 관리자"; Width = 860; Height = 780; MinimumSize = new Size(800, 720);
+        Text = "CellRelay 0.5 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         panel.Controls.Add(new Label { Text = "CellRelay · 아이폰 셀룰러 연결", Font = new Font(Font.FontFamily, 15F, FontStyle.Bold), AutoSize = true });
         panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② 연결 정보 적용 → ③ PC 중계 시작 → ④ 브라우저 프록시 설정", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
+        panel.Controls.Add(new Label { Text = "CR1 코드로 입력: 아이폰의 'PC용 CR1 연결 코드 전체 복사'를 사용하세요", AutoSize = true });
         var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
+        var reveal = new CheckBox { Text = "연결 코드·키 보기 (화면 공유 시 주의)", AutoSize = true }; reveal.CheckedChanged += (_, _) => { profileInput.UseSystemPasswordChar = token.UseSystemPasswordChar = !reveal.Checked; }; panel.Controls.Add(reveal);
+        panel.Controls.Add(new Label { Text = "직접 입력: CR1 코드가 없다면 아래 주소·실제 포트·연결 키만 입력하세요", AutoSize = true, Margin = new Padding(3, 12, 3, 6) });
         panel.Controls.Add(new Label { Text = "아이폰 주소", AutoSize = true }); panel.Controls.Add(host);
         var phonePortRow = new FlowLayoutPanel { AutoSize = true }; phonePortRow.Controls.AddRange([new Label { Text = "아이폰 실제 중계 포트", AutoSize = true }, phonePort]); panel.Controls.Add(phonePortRow);
         panel.Controls.Add(new Label { Text = "아이폰 앱에 표시된 연결 키", AutoSize = true }); panel.Controls.Add(token);
@@ -65,7 +68,8 @@ sealed class MainForm : Form
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
         guideTab.Controls.Add(new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Text = "연결 방법\r\n\r\n1. 아이폰 앱에서 중계를 시작합니다.\r\n2. PC와 아이폰을 신뢰하는 USB/로컬 네트워크로 연결합니다.\r\n3. 아이폰의 CR1 연결 정보를 위에 붙여 넣고 적용합니다. 주소·키 직접 입력도 가능합니다.\r\n4. 아이폰 연결 검사 후 PC 중계를 시작합니다.\r\n5. 브라우저의 HTTP/HTTPS 프록시에 화면에 표시된 127.0.0.1 주소와 포트를 입력합니다.\r\n\r\n아이폰 0.4 백그라운드\r\n\r\niOS 허용 시간 동안 기존 연결만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지합니다. 앱을 다시 열면 자동 재개 설정에 따라 새로운 연결을 받습니다. 끊긴 업로드를 자동 재전송하지 않습니다. 무기한 백그라운드 동작은 지원하지 않습니다.\r\n\r\nPC 중계 시작은 로컬 프록시 수신 시작입니다. 아이폰 연결 성공 여부는 연결 검사를 따로 실행하세요. 검사 결과는 해당 시각의 결과입니다. 전송량은 통신사 데이터 집계값이 아닙니다.\r\n\r\n사용 후 브라우저 프록시를 복구하세요. 실제 기기 동작과 공유 데이터 미차감은 미검증입니다." });
-        tabs.TabPages.AddRange([logTab, guideTab]); Controls.Add(tabs); Controls.Add(panel);
+        var connectionTab = new TabPage("연결 설정"); panel.Dock = DockStyle.Fill; connectionTab.Controls.Add(panel);
+        tabs.TabPages.AddRange([connectionTab, logTab, guideTab]); Controls.Add(tabs);
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
             try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
@@ -78,7 +82,9 @@ sealed class MainForm : Form
             try {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(closing.Token); timeout.CancelAfter(TimeSpan.FromSeconds(10)); using var phone = new TcpClient();
                 var elapsed = System.Diagnostics.Stopwatch.StartNew();
-                await phone.ConnectAsync(host.Text.Trim(), (int)phonePort.Value, timeout.Token); var stream = phone.GetStream();
+                try { await phone.ConnectAsync(host.Text.Trim(), (int)phonePort.Value, timeout.Token); }
+                catch (Exception e) when (e is SocketException or OperationCanceledException) { throw new IOException("PC에서 아이폰 앱에 도달하지 못했습니다. 같은 핫스팟 연결, 아이폰 앱의 현재 포트와 화면 상태를 확인하세요.", e); }
+                var stream = phone.GetStream();
                 await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { token = token.Text.Trim(), host = "example.com", port = 443 }) + "\n"), timeout.Token);
                 var result = await Proxy.ReadLine(stream, timeout.Token);
                 if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: " + (result == "OK" ? $"성공 · {elapsed.ElapsedMilliseconds} ms" : "거절 · 아이폰 앱 상태 확인");

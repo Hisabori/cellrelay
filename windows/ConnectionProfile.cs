@@ -8,7 +8,7 @@ static class Diagnostics
     public static string Redact(string text, string token)
     {
         if (token.Length >= 16) text = text.Replace(token, "[연결 키 숨김]", StringComparison.OrdinalIgnoreCase);
-        return System.Text.RegularExpressions.Regex.Replace(text, @"CR1:[A-Za-z0-9+/=]+", "[연결 코드 숨김]");
+        return System.Text.RegularExpressions.Regex.Replace(text, @"CR1:[A-Za-z0-9+/=]+", "[연결 코드 숨김]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 }
 
@@ -17,7 +17,8 @@ sealed record ConnectionProfile(string Host, string Token, int Port = 49152)
     public static ConnectionProfile Parse(string text)
     {
         text = text.Trim();
-        if (text.Length > 4096 || !text.StartsWith("CR1:", StringComparison.Ordinal)) throw new FormatException("CellRelay 연결 정보(CR1:)를 붙여 넣으세요.");
+        if (text.Length == 32 && text.All(Uri.IsHexDigit)) throw new FormatException("이 값은 연결 키만 포함합니다. 아래 '연결 키' 칸에 입력하고 아이폰 주소와 포트를 직접 입력하세요.");
+        if (text.Length > 4096 || !text.StartsWith("CR1:", StringComparison.OrdinalIgnoreCase)) throw new FormatException("CR1:로 시작하는 코드 전체를 붙여 넣으세요. 키만 있다면 아래 직접 입력 칸을 사용하세요.");
         try
         {
             var profile = JsonSerializer.Deserialize<ConnectionProfile>(Convert.FromBase64String(text[4..]), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });

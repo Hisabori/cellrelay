@@ -8,6 +8,27 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build PC app and run regression tests
+        shell: pwsh
+        run: |
+          dotnet build windows/CellRelay.csproj -c Release -p:NuGetAudit=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet windows/bin/Release/net8.0-windows/CellRelay.dll --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content self-test-result.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PC-regression-results
+          path: self-test-result.txt
+          if-no-files-found: error
   ios:
     runs-on: macos-15
     timeout-minutes: 20
