@@ -26,6 +26,7 @@ sealed class MainForm : Form
     readonly TextBox profileInput = new() { Width = 320, PlaceholderText = "아이폰에서 복사한 CR1: 연결 정보", UseSystemPasswordChar = true };
     readonly Button import = new() { Text = "연결 정보 적용", AutoSize = true };
     readonly Label proxyHint = new() { AutoSize = true };
+    readonly Label phoneStatus = new() { AutoSize = true, Text = "아이폰 연결: 아직 검사하지 않음" };
     readonly CancellationTokenSource closing = new();
     long lastUp, lastDown;
     readonly Label statistics = new() { AutoSize = true, MaximumSize = new Size(710, 0), Text = "대기 중" };
@@ -33,9 +34,12 @@ sealed class MainForm : Form
     Proxy? proxy;
     public MainForm()
     {
-        Text = "CellRelay 0.3 · iPhone 셀룰러 중계 테스트"; Width = 780; Height = 640; MinimumSize = new Size(760, 600);
+        Text = "CellRelay 0.4 · PC 연결 관리자"; Width = 860; Height = 740; MinimumSize = new Size(800, 680);
+        Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort;
-        var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 340, AutoScroll = true, Padding = new Padding(12), FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 405, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        panel.Controls.Add(new Label { Text = "CellRelay · 아이폰 셀룰러 연결", Font = new Font(Font.FontFamily, 15F, FontStyle.Bold), AutoSize = true });
+        panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② 연결 정보 적용 → ③ PC 중계 시작 → ④ 브라우저 프록시 설정", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
         var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
         panel.Controls.Add(new Label { Text = "아이폰 주소 (아이폰 앱 포트: 49152)", AutoSize = true }); panel.Controls.Add(host);
         panel.Controls.Add(new Label { Text = "아이폰 앱에 표시된 연결 키", AutoSize = true }); panel.Controls.Add(token);
@@ -43,6 +47,7 @@ sealed class MainForm : Form
         var portRow = new FlowLayoutPanel { AutoSize = true }; portRow.Controls.AddRange([new Label { Text = "PC 프록시 포트", AutoSize = true }, proxyPort]); panel.Controls.Add(portRow);
         panel.Controls.Add(proxyHint);
         panel.Controls.Add(statistics);
+        panel.Controls.Add(phoneStatus);
         var tools = new FlowLayoutPanel { AutoSize = true };
         var copyProxy = new Button { Text = "프록시 주소 복사", AutoSize = true }; var export = new Button { Text = "진단 기록 저장", AutoSize = true }; var clear = new Button { Text = "기록 지우기", AutoSize = true };
         tools.Controls.AddRange([copyProxy, export, clear]); panel.Controls.Add(tools);
@@ -51,8 +56,12 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { var profile = ConnectionProfile.Parse(profileInput.Text); host.Text = profile.Host; token.Text = profile.Token; profileInput.Clear(); Log("연결 정보를 적용했습니다. 아직 연결하지 않았습니다."); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.3 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
-        Controls.Add(log); Controls.Add(panel);
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.4 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
+        var guideTab = new TabPage("사용 안내 · 백그라운드");
+        guideTab.Controls.Add(new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Text = "연결 방법\r\n\r\n1. 아이폰 앱에서 중계를 시작합니다.\r\n2. PC와 아이폰을 신뢰하는 USB/로컬 네트워크로 연결합니다.\r\n3. 아이폰의 CR1 연결 정보를 위에 붙여 넣고 적용합니다. 주소·키 직접 입력도 가능합니다.\r\n4. 아이폰 연결 검사 후 PC 중계를 시작합니다.\r\n5. 브라우저의 HTTP/HTTPS 프록시에 화면에 표시된 127.0.0.1 주소와 포트를 입력합니다.\r\n\r\n아이폰 0.4 백그라운드\r\n\r\niOS 허용 시간 동안 기존 연결만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지합니다. 앱을 다시 열면 자동 재개 설정에 따라 새로운 연결을 받습니다. 끊긴 업로드를 자동 재전송하지 않습니다. 무기한 백그라운드 동작은 지원하지 않습니다.\r\n\r\nPC 중계 시작은 로컬 프록시 수신 시작입니다. 아이폰 연결 성공 여부는 연결 검사를 따로 실행하세요. 검사 결과는 해당 시각의 결과입니다. 전송량은 통신사 데이터 집계값이 아닙니다.\r\n\r\n사용 후 브라우저 프록시를 복구하세요. 실제 기기 동작과 공유 데이터 미차감은 미검증입니다." });
+        tabs.TabPages.AddRange([logTab, guideTab]); Controls.Add(tabs); Controls.Add(panel);
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
             try { proxy = new Proxy(host.Text.Trim(), 49152, token.Text.Trim(), (int)proxyPort.Value, Log); proxy.Start(); lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("시작됨. 아이폰 앱을 화면에 켜 두세요. 공유 데이터 미차감은 검증되지 않았습니다."); }
@@ -61,13 +70,14 @@ sealed class MainForm : Form
         stop.Click += (_, _) => Stop(); FormClosing += (_, _) => { closing.Cancel(); refresh.Stop(); refresh.Dispose(); proxy?.Dispose(); };
         diagnose.Click += async (_, _) => {
             if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) { MessageBox.Show("아이폰 주소와 앱의 32자리 연결 키를 먼저 입력하세요."); return; }
-            diagnose.Enabled = false;
+            diagnose.Enabled = false; phoneStatus.Text = "아이폰 연결 검사 중…";
             try {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(closing.Token); timeout.CancelAfter(TimeSpan.FromSeconds(10)); using var phone = new TcpClient();
                 var elapsed = System.Diagnostics.Stopwatch.StartNew();
                 await phone.ConnectAsync(host.Text.Trim(), 49152, timeout.Token); var stream = phone.GetStream();
                 await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { token = token.Text.Trim(), host = "example.com", port = 443 }) + "\n"), timeout.Token);
                 var result = await Proxy.ReadLine(stream, timeout.Token);
+                if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: " + (result == "OK" ? $"성공 · {elapsed.ElapsedMilliseconds} ms" : "거절 · 아이폰 앱 상태 확인");
                 Log(result == "OK" ? $"검사 성공 ({elapsed.ElapsedMilliseconds} ms): 아이폰 인증 및 example.com:443 셀룰러 TCP 연결. 데이터 차감 결과는 별도 확인하세요." : "검사 거절: " + result);
             } catch (Exception e) when (e is SocketException or IOException or OperationCanceledException) { Log("검사 실패: " + (e is OperationCanceledException ? "10초 응답 시간 초과" : e.Message)); }
             finally { if (!IsDisposed) diagnose.Enabled = true; }

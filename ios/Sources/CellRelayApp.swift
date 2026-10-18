@@ -23,15 +23,24 @@ import Darwin
                         Button("새 연결 키 만들기") { relay.rotateKey() }.disabled(relay.running)
                         Button(relay.running ? "중지" : "중계 시작") { relay.running ? relay.stop() : relay.start() }
                         Text(relay.statistics).font(.caption.monospaced())
+                        Text(relay.backgroundStatus).font(.caption)
+                        Toggle("앱 복귀 시 자동 재개", isOn: $relay.autoResume)
                     }
                     Section("테스트 범위") {
-                        Text("PC → 아이폰 앱 → 셀룰러. 이 앱을 화면에 켜 두세요. 백그라운드로 이동하면 중계를 중지합니다.")
+                        Text("PC → 아이폰 앱 → 셀룰러. 백그라운드에서는 기존 연결을 iOS가 허용한 시간 동안만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지하고 앱 복귀 시 재개합니다. 무기한 백그라운드 중계는 지원하지 않습니다.")
                         Text("HTTP/HTTPS TCP 프록시 테스트용. 공유 데이터 미차감은 검증되지 않았습니다.")
                         Text("신뢰하는 USB/로컬 네트워크에서만 사용하세요. 연결 키와 PC-아이폰 구간은 암호화되지 않습니다. HTTPS 내용은 원래의 TLS로 보호됩니다.")
                     }
                     Section("기록") { Text(relay.events).font(.caption.monospaced()).textSelection(.enabled) }
                 }.navigationTitle("CellRelay 테스트")
-            }.onChange(of: phase) { value in if value == .background { relay.stop() } }
+            }.onChange(of: phase) { value in
+                switch value {
+                case .inactive: relay.prepareForBackground()
+                case .background: relay.enterBackground()
+                case .active: relay.enterForeground()
+                @unknown default: break
+                }
+            }
         }
     }
 }
@@ -43,6 +52,13 @@ final class Relay: ObservableObject {
     @Published var addresses = "시작 시 확인"
     @Published var token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     @Published var statistics = "연결 0 · 업로드 0 B · 다운로드 0 B"
+    @Published var backgroundStatus = "화면 활성 상태"
+    @Published var autoResume = true
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundGeneration: UUID?
+    private var resumeOnForeground = false
+    private var isBackground = false
+    private var queueIsBackground = false
     private var runID: UUID?
     // Listener lifecycle belongs to the main queue; sessions and counters belong to queue.
     private var queueRunID: UUID?
@@ -52,6 +68,41 @@ final class Relay: ObservableObject {
     private let queue = DispatchQueue(label: "cellrelay.network")
     private var listener: NWListener?
     private var sessions: [UUID: Session] = [:]
+    func prepareForBackground() {
+        guard running, backgroundTask == .invalid else { return }
+        let expectedRun = runID
+        let generation = UUID(); backgroundGeneration = generation
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CellRelayFinishConnections") { [weak self] in
+            guard let self, self.runID == expectedRun, self.backgroundGeneration == generation else { return }
+            guard self.isBackground else { self.endBackgroundTime(); return }
+            self.note("백그라운드 허용 시간 만료 · 기존 연결 정리")
+            self.stop(resumeWhenActive: self.autoResume)
+            self.backgroundStatus = "시간 만료 · 앱을 열면 재개"
+        }
+    }
+    func enterBackground() {
+        isBackground = true; UIApplication.shared.isIdleTimerDisabled = false
+        guard running else { return }
+        prepareForBackground()
+        guard backgroundTask != .invalid else {
+            stop(resumeWhenActive: autoResume); backgroundStatus = "백그라운드 실행 시간이 허용되지 않음"; return
+        }
+        backgroundStatus = "백그라운드 · 기존 연결만 마무리 중"
+        queue.async { self.queueIsBackground = true }
+    }
+    func enterForeground() {
+        isBackground = false
+        queue.sync { queueIsBackground = false }
+        endBackgroundTime()
+        backgroundStatus = "화면 활성 상태"
+        let resume = resumeOnForeground && autoResume; resumeOnForeground = false
+        if resume { start(); note("앱 복귀 · 새 연결 수신 재개 (이전 요청은 재전송하지 않음)") }
+        UIApplication.shared.isIdleTimerDisabled = running
+    }
+    private func endBackgroundTime() {
+        let task = backgroundTask; backgroundTask = .invalid; backgroundGeneration = nil
+        if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+    }
     var localHosts: [String] { addresses.components(separatedBy: ", ").compactMap { entry in
         let host = entry.components(separatedBy: ": ").last ?? ""
         return IPv4Address(host) == nil ? nil : host
@@ -65,20 +116,30 @@ final class Relay: ObservableObject {
     func rotateKey() { guard !running else { return }; token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
     func note(_ message: String) { DispatchQueue.main.async { self.events = String((self.events + "\n" + message).suffix(6000)) } }
     func start() {
-        guard !running else { return }
+        guard !running, !isBackground else { return }
+        resumeOnForeground = false
         do {
             let currentRun = UUID(); let connectionToken = token
             let listener = try NWListener(using: .tcp, on: 49152)
             self.listener = listener; self.runID = currentRun
             queue.async {
-                self.queueRunID = currentRun; self.uploaded = 0; self.downloaded = 0
+                self.queueRunID = currentRun; self.queueIsBackground = false; self.uploaded = 0; self.downloaded = 0
                 self.statsTimer?.cancel()
                 let timer = DispatchSource.makeTimerSource(queue: self.queue)
                 timer.schedule(deadline: .now(), repeating: 1)
                 timer.setEventHandler { [weak self] in
                     guard let self, self.queueRunID == currentRun else { return }
                     let summary = "연결 \(self.sessions.count)/32 · 업로드 \(self.uploaded) B · 다운로드 \(self.downloaded) B"
-                    DispatchQueue.main.async { [weak self] in guard let self, self.runID == currentRun else { return }; self.statistics = summary }
+                    let drained = self.queueIsBackground && self.sessions.isEmpty
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.runID == currentRun else { return }
+                        self.statistics = summary
+                        if drained && self.isBackground { self.stop(resumeWhenActive: self.autoResume); self.backgroundStatus = "기존 연결 완료 · 앱을 열면 재개" }
+                        else if self.isBackground {
+                            let remaining = UIApplication.shared.backgroundTimeRemaining
+                            self.backgroundStatus = remaining.isFinite && remaining < 86400 ? "백그라운드 · 남은 시간 약 \(Int(max(0, remaining)))초" : "백그라운드 · iOS 허용 시간 내 연결 마무리"
+                        }
+                    }
                 }
                 self.statsTimer = timer; timer.resume()
             }
@@ -88,7 +149,7 @@ final class Relay: ObservableObject {
                 DispatchQueue.main.async {
                     guard self.runID == currentRun else { return }
                     switch state {
-                    case .ready: self.status = "연결 대기 · 셀룰러 출구"; self.running = true; UIApplication.shared.isIdleTimerDisabled = true
+                    case .ready: self.status = "연결 대기 · 셀룰러 출구"; self.running = true; UIApplication.shared.isIdleTimerDisabled = !self.isBackground
                     case .failed(let error): self.note(error.localizedDescription); self.stop()
                     case .waiting(let error): self.status = "네트워크 대기: \(error.localizedDescription)"
                     default: break
@@ -97,7 +158,7 @@ final class Relay: ObservableObject {
             }
             listener.newConnectionHandler = { [weak self] client in
                 guard let self else { client.cancel(); return }
-                guard self.queueRunID == currentRun else { client.cancel(); return }
+                guard self.queueRunID == currentRun, !self.queueIsBackground else { client.cancel(); return }
                 guard self.sessions.count < 32 else { client.cancel(); return }
                 let id = UUID()
                 let session = Session(client: client, token: connectionToken, queue: self.queue, note: self.note, activity: { [weak self] count, upload in
@@ -109,13 +170,15 @@ final class Relay: ObservableObject {
             addresses = Self.localAddresses(); running = true; status = "시작 중"; listener.start(queue: queue)
         } catch { note(error.localizedDescription) }
     }
-    func stop() {
+    func stop(resumeWhenActive: Bool = false) {
+        resumeOnForeground = resumeWhenActive
         let old = listener; listener = nil; runID = nil; old?.cancel()
-        queue.async {
+        queue.sync {
             self.queueRunID = nil; self.statsTimer?.cancel(); self.statsTimer = nil
             let oldSessions = Array(self.sessions.values); oldSessions.forEach { $0.close() }
         }
-        running = false; status = "중지됨"; statistics = "중지됨 · 활성 연결 정리 중"; UIApplication.shared.isIdleTimerDisabled = false
+        endBackgroundTime()
+        running = false; status = resumeWhenActive ? "중지됨 · 화면 복귀 대기" : "중지됨"; statistics = "활성 연결 0"; UIApplication.shared.isIdleTimerDisabled = false
     }
     static func localAddresses() -> String {
         var head: UnsafeMutablePointer<ifaddrs>?
