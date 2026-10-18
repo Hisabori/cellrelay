@@ -88,5 +88,18 @@ static class StabilityTests
             Require((await Proxy.ReadHeader(probe.GetStream(), ct)).StartsWith("HTTP/1.1 400"), "Restart on same port failed");
         }
         finally { foreach (var client in clients) client.Dispose(); }
+        var occupied = new TcpListener(IPAddress.Loopback, 0); occupied.Start();
+        try
+        {
+            int occupiedPort = ((IPEndPoint)occupied.LocalEndpoint).Port;
+            using var fallback = ProxyStarter.Start("127.0.0.1", "unused", occupiedPort, _ => {});
+            Require(fallback.Port != occupiedPort, "Port conflict did not select a new port");
+            using var client = new TcpClient(); await client.ConnectAsync(IPAddress.Loopback, fallback.Port, ct);
+            var stream = client.GetStream(); await stream.WriteAsync("CONNECT missing-port HTTP/1.1\r\n\r\n"u8.ToArray(), ct);
+            Require((await Proxy.ReadHeader(stream, ct)).StartsWith("HTTP/1.1 400"), "Fallback listener not working");
+            using var originalClient = new TcpClient(); await originalClient.ConnectAsync(IPAddress.Loopback, occupiedPort, ct);
+            using var originalAccepted = await occupied.AcceptTcpClientAsync(ct);
+        }
+        finally { occupied.Stop(); }
     }
 }

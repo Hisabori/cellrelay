@@ -21,14 +21,14 @@ sealed record ConnectionProfile(string Host, string Token, int Port = 49152)
         try
         {
             var profile = JsonSerializer.Deserialize<ConnectionProfile>(Convert.FromBase64String(text[4..]), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (profile is null || string.IsNullOrEmpty(profile.Host) || Uri.CheckHostName(profile.Host) == UriHostNameType.Unknown || profile.Port != 49152 || profile.Token is null || profile.Token.Length != 32 || !profile.Token.All(Uri.IsHexDigit)) throw new FormatException();
+            if (profile is null || string.IsNullOrEmpty(profile.Host) || Uri.CheckHostName(profile.Host) == UriHostNameType.Unknown || profile.Port is < 1024 or > 65535 || profile.Token is null || profile.Token.Length != 32 || !profile.Token.All(Uri.IsHexDigit)) throw new FormatException();
             return profile;
         }
         catch (Exception e) when (e is JsonException or FormatException) { throw new FormatException("연결 정보가 손상됐거나 지원하지 않는 형식입니다."); }
     }
 }
 
-sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877)
+sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877, int PhonePort = 49152)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CellRelay", "settings.json");
     public static AppSettings Load(string path)
@@ -36,7 +36,7 @@ sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877)
         try
         {
             var value = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path));
-            return value is not null && Uri.CheckHostName(value.Host ?? "") != UriHostNameType.Unknown && value.ProxyPort is >= 1024 and <= 65535 ? value : new();
+            return value is not null && Uri.CheckHostName(value.Host ?? "") != UriHostNameType.Unknown && value.ProxyPort is >= 1024 and <= 65535 && value.PhonePort is >= 1024 and <= 65535 ? value : new();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }

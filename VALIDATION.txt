@@ -1,4 +1,4 @@
-2026-10-18 — CellRelay 0.4.0
+2026-10-18 — CellRelay PC 0.4.1 / iOS 0.4.0
 Windows x64 self-contained publish: PASS (.NET SDK 8.0.422)
 Windows published build DLL --self-test: PASS, exit 0. Manual GUI interaction not tested.
 Tested with a local simulated iPhone peer:
@@ -19,6 +19,7 @@ Tested with a local simulated iPhone peer:
 - Corrupt, oversized, invalid-host and unsupported-port profiles rejected
 - Settings save/load and corrupt JSON fallback
 - Diagnostic redaction of current token and encoded connection code
+- Occupied-port fallback: alternate listener works while the original listener remains available
 Native test used workspace-local DOTNET_BUNDLE_EXTRACT_BASE_DIR.
 Initial loopback socket test was restricted by the sandbox; rerun passed after network permission was granted.
 Final build succeeded with 0 warnings and 0 errors. NuGet vulnerability auditing was disabled; no third-party NuGet packages are referenced.

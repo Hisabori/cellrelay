@@ -12,7 +12,7 @@ import Darwin
                 Form {
                     Section("연결") {
                         Text(relay.status)
-                        LabeledContent("포트", value: "49152")
+                        LabeledContent("실제 중계 포트", value: relay.listenPort == 0 ? "대기 중" : String(relay.listenPort))
                         LabeledContent("로컬 주소", value: relay.addresses)
                         ForEach(relay.localHosts, id: \.self) { host in
                             Button("\(host) 연결 정보 복사") { relay.copyProfile(host: host) }
@@ -53,6 +53,7 @@ final class Relay: ObservableObject {
     @Published var token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     @Published var statistics = "연결 0 · 업로드 0 B · 다운로드 0 B"
     @Published var backgroundStatus = "화면 활성 상태"
+    @Published var listenPort: UInt16 = 0
     @Published var autoResume = true
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var backgroundGeneration: UUID?
@@ -108,19 +109,19 @@ final class Relay: ObservableObject {
         return IPv4Address(host) == nil ? nil : host
     } }
     func copyProfile(host: String) {
-        guard IPv4Address(host) != nil,
-              let data = try? JSONSerialization.data(withJSONObject: ["host": host, "token": token, "port": 49152], options: [.sortedKeys]) else { return }
+        guard IPv4Address(host) != nil, listenPort > 0,
+              let data = try? JSONSerialization.data(withJSONObject: ["host": host, "token": token, "port": Int(listenPort)], options: [.sortedKeys]) else { note("중계 준비가 완료된 뒤 연결 정보를 복사하세요."); return }
         UIPasteboard.general.string = "CR1:" + data.base64EncodedString()
         note("연결 정보를 복사했습니다. Windows에 직접 전달하세요. 인증 키가 포함되어 있습니다.")
     }
     func rotateKey() { guard !running else { return }; token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased() }
     func note(_ message: String) { DispatchQueue.main.async { self.events = String((self.events + "\n" + message).suffix(6000)) } }
-    func start() {
+    func start(dynamicPort: Bool = false) {
         guard !running, !isBackground else { return }
         resumeOnForeground = false
         do {
             let currentRun = UUID(); let connectionToken = token
-            let listener = try NWListener(using: .tcp, on: 49152)
+            let listener = try NWListener(using: .tcp, on: dynamicPort ? .any : 49152)
             self.listener = listener; self.runID = currentRun
             queue.async {
                 self.queueRunID = currentRun; self.queueIsBackground = false; self.uploaded = 0; self.downloaded = 0
@@ -144,13 +145,19 @@ final class Relay: ObservableObject {
                 self.statsTimer = timer; timer.resume()
             }
             listener.service = NWListener.Service(name: "CellRelay", type: "_cellrelay._tcp")
-            listener.stateUpdateHandler = { [weak self] state in
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
                 guard let self else { return }
                 DispatchQueue.main.async {
                     guard self.runID == currentRun else { return }
                     switch state {
-                    case .ready: self.status = "연결 대기 · 셀룰러 출구"; self.running = true; UIApplication.shared.isIdleTimerDisabled = !self.isBackground
-                    case .failed(let error): self.note(error.localizedDescription); self.stop()
+                    case .ready:
+                        self.listenPort = listener?.port?.rawValue ?? 0
+                        self.status = "연결 대기 · 포트 \(self.listenPort)"; self.running = true; UIApplication.shared.isIdleTimerDisabled = !self.isBackground
+                        if dynamicPort { self.note("기본 포트 사용 중 · 빈 포트 \(self.listenPort)로 전환. 연결 정보를 다시 복사해 PC에 적용하세요.") }
+                    case .failed(let error):
+                        self.stop()
+                        if !dynamicPort, case .posix(.EADDRINUSE) = error { self.note("49152 포트가 사용 중입니다. 빈 포트로 다시 시작합니다."); self.start(dynamicPort: true) }
+                        else { self.status = "중계 시작 실패"; self.note("\(error). 로컬 네트워크 권한과 다른 중계 앱 실행 여부를 확인하세요.") }
                     case .waiting(let error): self.status = "네트워크 대기: \(error.localizedDescription)"
                     default: break
                     }
@@ -168,11 +175,14 @@ final class Relay: ObservableObject {
                 self.sessions[id] = session; session.start()
             }
             addresses = Self.localAddresses(); running = true; status = "시작 중"; listener.start(queue: queue)
-        } catch { note(error.localizedDescription) }
+        } catch {
+            if !dynamicPort, let networkError = error as? NWError, case .posix(.EADDRINUSE) = networkError { note("기본 포트 사용 중 · 빈 포트 시도"); start(dynamicPort: true) }
+            else { status = "중계 시작 실패"; note("\(error). 설정에서 로컬 네트워크 접근을 확인하세요.") }
+        }
     }
     func stop(resumeWhenActive: Bool = false) {
         resumeOnForeground = resumeWhenActive
-        let old = listener; listener = nil; runID = nil; old?.cancel()
+        let old = listener; listener = nil; runID = nil; listenPort = 0; old?.cancel()
         queue.sync {
             self.queueRunID = nil; self.statsTimer?.cancel(); self.statsTimer = nil
             let oldSessions = Array(self.sessions.values); oldSessions.forEach { $0.close() }
