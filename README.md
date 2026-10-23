@@ -1,8 +1,10 @@
-# CellRelay 0.5 — 탈옥 없는 아이폰 셀룰러 중계 실험
+# CellRelay 0.7 — 아이폰 셀룰러 중계 실험
 
-0.5에서는 아이폰에서 CR1 코드를 직접 펼쳐 보고 복사·공유할 수 있습니다. 주소는 앱 복귀 시 및 중계 중 약 5초마다 자동 갱신하며 새로고침 버튼도 제공합니다. 주소를 알고 있다면 직접 입력할 수 있습니다. 코드 생성은 실제 네트워크 도달 가능성을 확인하는 기능이 아닙니다.
+간편 연결: CR1 코드 또는 QR 이미지를 등록한 뒤 '코드 적용 · 검사 · 간편 연결'을 누르면 HTTPS 검사 후 PC 프록시를 시작합니다. 브라우저 프록시는 화면의 로컬 주소로 설정하세요.
 
-PC는 연결 설정/연결 기록/도움말 탭으로 나누고, 코드·키 표시 체크박스를 제공합니다. cr1: 소문자 접두어도 읽으며 연결 키만 입력한 경우 직접 입력 방법을 안내합니다. 기존 중계·포트 회피·유한한 백그라운드 연결 마무리 기능은 유지합니다.
+QR 등록: 아이폰에서 'PC 등록용 QR 보기'를 누르고 화면을 캡처하여 본인 PC로 전달합니다. PC에서 'QR 이미지로 등록'으로 열거나 이미지를 복사하고 '클립보드 QR 등록'을 누릅니다. QR에는 연결 키가 포함됩니다. 카메라 스캔은 포함하지 않습니다.
+
+UDP · QUIC 전달 탭: 목적지 호스트와 UDP 포트, PC 로컬 수신 포트를 입력합니다. 앱에서 로컬 포트로 보낸 UDP 패킷을 아이폰의 셀룰러로 전달합니다. QUIC 클라이언트는 원래 서버 이름과 인증서 검증을 유지한 채 목적지 주소만 바꿀 수 있어야 합니다. 네이티브 QUIC 터널이나 브라우저 자동 HTTP/3 전환은 구현하지 않았습니다. TCP 터널의 재전송 대기 때문에 지연이 증가할 수 있습니다. UDP 지원에는 0.7 IPA가 필요합니다.
 
 Windows HTTP/HTTPS 프록시 → 로컬 TCP 연결 → 아이폰 앱 → 셀룰러 TCP 연결.
 아이폰의 출구는 Network.framework의 `requiredInterfaceType = .cellular`로 제한합니다. 셀룰러 경로가 없으면 연결 실패하며 PC에서 직접 인터넷으로 우회하지 않습니다.
@@ -83,3 +85,4 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+

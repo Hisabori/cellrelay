@@ -1,0 +1,4 @@
+CellRelay 0.7 includes ZXing.Net and its Windows Compatibility binding (Apache-2.0).
+Project and license: https://github.com/micjahn/ZXing.Net
+Packages: ZXing.Net.Bindings.Windows.Compatibility 0.16.16 and transitive dependencies.
+QR processing is local; images and connection profiles are not uploaded by this feature.

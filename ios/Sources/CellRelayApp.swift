@@ -2,6 +2,7 @@ import SwiftUI
 import Network
 import UIKit
 import Darwin
+import CoreImage.CIFilterBuiltins
 
 @main struct CellRelayApp: App {
     @StateObject private var relay = Relay()
@@ -27,11 +28,11 @@ import Darwin
                     }
                     Section("테스트 범위") {
                         Text("PC → 아이폰 앱 → 셀룰러. 백그라운드에서는 기존 연결을 iOS가 허용한 시간 동안만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지하고 앱 복귀 시 재개합니다. 무기한 백그라운드 중계는 지원하지 않습니다.")
-                        Text("HTTP/HTTPS TCP 프록시 테스트용. 공유 데이터 미차감은 검증되지 않았습니다.")
+                        Text("HTTP/HTTPS TCP 프록시 및 UDP 패킷 전달 테스트용. QUIC는 UDP 전달 경로를 이용합니다. 공유 데이터 미차감은 검증되지 않았습니다.")
                         Text("신뢰하는 USB/로컬 네트워크에서만 사용하세요. 연결 키와 PC-아이폰 구간은 암호화되지 않습니다. HTTPS 내용은 원래의 TLS로 보호됩니다.")
                     }
                     Section("기록") { Text(relay.events).font(.caption.monospaced()).textSelection(.enabled) }
-                }.navigationTitle("CellRelay 0.5")
+                }.navigationTitle("CellRelay 0.7")
             }.onChange(of: phase) { value in
                 switch value {
                 case .inactive: relay.prepareForBackground()
@@ -47,6 +48,7 @@ import Darwin
 private struct ConnectionSetupView: View {
     @ObservedObject var relay: Relay
     @State private var showCode = false
+    @State private var showQR = false
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button("주소 새로고침 · 연결을 끊지 않음") { relay.refreshAddresses() }
@@ -62,6 +64,12 @@ private struct ConnectionSetupView: View {
                 DisclosureGroup("CR1 코드 직접 보기", isExpanded: $showCode) {
                     Text(code).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 }
+                Button("PC 등록용 QR 보기") { showQR.toggle() }
+                if showQR, let image = qrImage(code) {
+                    Image(uiImage: image).interpolation(.none).resizable().scaledToFit().frame(maxWidth: 300).padding(16).background(Color.white)
+                        .accessibilityLabel("PC 등록용 연결 QR 코드")
+                    Text("이 화면을 캡처한 뒤 PC에서 QR 이미지로 등록하거나 클립보드 QR 등록을 누르세요.").font(.caption)
+                }
                 ShareLink(item: code) { Text("연결 코드 공유") }
                 Text("연결 코드에는 인증 키가 포함됩니다. 본인 PC에만 전달하세요.").font(.caption)
             } else {
@@ -69,6 +77,13 @@ private struct ConnectionSetupView: View {
             }
         }
     }
+}
+
+private func qrImage(_ text: String) -> UIImage? {
+    let filter = CIFilter.qrCodeGenerator()
+    filter.message = Data(text.utf8); filter.correctionLevel = "M"
+    guard let output = filter.outputImage, let image = CIContext().createCGImage(output.transformed(by: CGAffineTransform(scaleX: 8, y: 8)), from: output.extent.applying(CGAffineTransform(scaleX: 8, y: 8))) else { return nil }
+    return UIImage(cgImage: image)
 }
 
 final class Relay: ObservableObject {
@@ -264,7 +279,7 @@ final class Relay: ObservableObject {
     }
 }
 
-private struct Hello: Decodable { let token: String; let host: String; let port: UInt16 }
+private struct Hello: Decodable { let token: String; let host: String; let port: UInt16; let transport: String? }
 private final class Session {
     let client: NWConnection
     let token: String
@@ -305,13 +320,13 @@ private final class Session {
             if let newline = self.header.firstIndex(of: 10) {
                 guard newline < 8192, let hello = try? JSONDecoder().decode(Hello.self, from: self.header.prefix(upTo: newline)), hello.token == self.token, hello.port > 0, !hello.host.isEmpty, hello.host.utf8.count <= 253, !hello.host.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }) else { self.reject("authentication or destination"); return }
                 let pending = Data(self.header.suffix(from: self.header.index(after: newline)))
-                self.header.removeAll(); self.connect(hello, pending: pending)
+                self.header.removeAll(); guard hello.transport == nil || hello.transport == "tcp" || hello.transport == "udp" else { self.reject("transport"); return }; self.connect(hello, pending: pending)
             } else if self.header.count >= 8192 { self.reject("header") }
             else if complete || error != nil { self.close() } else { self.readHello() }
         }
     }
     func connect(_ hello: Hello, pending: Data) {
-        let parameters = NWParameters.tcp
+        let parameters = hello.transport == "udp" ? NWParameters.udp : NWParameters.tcp
         parameters.requiredInterfaceType = .cellular
         let remote = NWConnection(host: NWEndpoint.Host(hello.host), port: NWEndpoint.Port(rawValue: hello.port)!, using: parameters)
         upstream = remote
@@ -321,9 +336,10 @@ private final class Session {
             case .ready:
                 guard !self.ready, !self.rejecting else { return }; self.ready = true; self.lastActivity = ProcessInfo.processInfo.systemUptime
                 self.note("셀룰러 연결: \(hello.host):\(hello.port)")
-                self.client.send(content: Data("OK\n".utf8), completion: .contentProcessed { [weak self] error in
+                self.client.send(content: Data((hello.transport == "udp" ? "OK UDP1\n" : "OK\n").utf8), completion: .contentProcessed { [weak self] error in
                     guard let self, !self.finished else { return }
                     if error != nil { self.close(); return }
+                    if hello.transport == "udp" { self.datagramBuffer = pending; self.readDatagram(remote); self.receiveDatagram(remote); return }
                     if pending.isEmpty { self.pump(self.client, remote) }
                     else { self.activity(pending.count, true); remote.send(content: pending, completion: .contentProcessed { [weak self] error in guard let self, !self.finished else { return }; if error != nil { self.close() } else { self.pump(self.client, remote) } }) }
                     self.pump(remote, self.client)
@@ -333,6 +349,44 @@ private final class Session {
             }
         }
         remote.start(queue: queue)
+    }
+    var datagramBuffer = Data()
+    func readDatagram(_ remote: NWConnection) {
+        guard !finished else { return }
+        if datagramBuffer.count >= 2 {
+            let size = Int(datagramBuffer[datagramBuffer.startIndex]) * 256 + Int(datagramBuffer[datagramBuffer.index(after: datagramBuffer.startIndex)])
+            guard size <= 65507 else { reject("datagram size"); return }
+            if datagramBuffer.count >= size + 2 {
+                let packet = Data(datagramBuffer.dropFirst(2).prefix(size))
+                datagramBuffer = Data(datagramBuffer.dropFirst(size + 2))
+                remote.send(content: packet, completion: .contentProcessed { [weak self] error in
+                    guard let self, !self.finished else { return }
+                    if error != nil { self.close(); return }
+                    self.lastActivity = ProcessInfo.processInfo.systemUptime; self.activity(packet.count, true); self.readDatagram(remote)
+                })
+                return
+            }
+        }
+        client.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, complete, error in
+            guard let self, !self.finished else { return }
+            if let data { self.datagramBuffer.append(data) }
+            if error != nil || complete { self.close(); return }
+            self.readDatagram(remote)
+        }
+    }
+    func receiveDatagram(_ remote: NWConnection) {
+        guard !finished else { return }
+        remote.receiveMessage { [weak self] data, _, _, error in
+            guard let self, !self.finished else { return }
+            if error != nil { self.close(); return }
+            guard let data, data.count <= 65507 else { self.close(); return }
+            var frame = Data([UInt8(data.count >> 8), UInt8(data.count & 255)]); frame.append(data)
+            self.client.send(content: frame, completion: .contentProcessed { [weak self] error in
+                guard let self, !self.finished else { return }
+                if error != nil { self.close(); return }
+                self.lastActivity = ProcessInfo.processInfo.systemUptime; self.activity(data.count, false); self.receiveDatagram(remote)
+            })
+        }
     }
     func pump(_ from: NWConnection, _ to: NWConnection) {
         guard !finished else { return }
@@ -360,4 +414,7 @@ private final class Session {
         client.cancel(); upstream?.cancel(); ended()
     }
 }
+
+
+
 

@@ -35,9 +35,10 @@ sealed class MainForm : Form
     readonly Label statistics = new() { AutoSize = true, MaximumSize = new Size(710, 0), Text = "대기 중" };
     readonly System.Windows.Forms.Timer refresh = new() { Interval = 1000 };
     Proxy? proxy;
+    DatagramRelay? datagrams;
     public MainForm()
     {
-        Text = "CellRelay 0.6 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.7 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
@@ -45,6 +46,38 @@ sealed class MainForm : Form
         panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② 연결 정보 적용 → ③ PC 중계 시작 → ④ 브라우저 프록시 설정", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
         panel.Controls.Add(new Label { Text = "CR1 코드로 입력: 아이폰의 'PC용 CR1 연결 코드 전체 복사'를 사용하세요", AutoSize = true });
         var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
+        var easy = new Button { Text = "코드 적용 · 검사 · 간편 연결", AutoSize = true };
+        var qr = new Button { Text = "QR 이미지로 등록", AutoSize = true };
+        var qrClipboard = new Button { Text = "클립보드 QR 등록", AutoSize = true };
+        var quickRow = new FlowLayoutPanel { AutoSize = true }; quickRow.Controls.AddRange([easy, qr, qrClipboard]); panel.Controls.Add(quickRow);
+        void Apply(ConnectionProfile profile) {
+            if (proxy != null || datagrams != null) throw new FormatException("실행 중인 중계를 먼저 중지하세요.");
+            host.Text = profile.Host; token.Text = profile.Token; phonePort.Value = profile.Port; profileInput.Clear();
+            Log("연결 정보를 적용했습니다. 간편 연결 또는 중계 시작을 누르세요.");
+        }
+        qr.Click += (_, _) => {
+            using var picker = new OpenFileDialog { Filter = "QR 이미지|*.png;*.jpg;*.jpeg;*.bmp", CheckFileExists = true };
+            if (picker.ShowDialog() != DialogResult.OK) return;
+            try { if (new FileInfo(picker.FileName).Length > 20 * 1024 * 1024) throw new FormatException("이미지는 20MB 이하로 준비하세요."); using var image = new Bitmap(picker.FileName); Apply(QrProfile.Read(image)); }
+            catch (Exception e) when (e is FormatException or ArgumentException or IOException or OutOfMemoryException or UnauthorizedAccessException) { MessageBox.Show("QR 등록 실패: " + e.Message); }
+        };
+        qrClipboard.Click += (_, _) => {
+            try { using var source = Clipboard.GetImage(); if (source is null) throw new FormatException("클립보드에 QR 이미지가 없습니다. 아이폰 QR 화면 이미지를 복사하세요."); using var image = new Bitmap(source); Apply(QrProfile.Read(image)); }
+            catch (Exception e) when (e is FormatException or ArgumentException or System.Runtime.InteropServices.ExternalException) { MessageBox.Show("QR 등록 실패: " + e.Message); }
+        };
+        easy.Click += async (_, _) => {
+            if (proxy != null || datagrams != null) { MessageBox.Show("실행 중인 중계를 먼저 중지하세요."); return; }
+            try {
+                if (!string.IsNullOrWhiteSpace(profileInput.Text)) Apply(ConnectionProfile.Parse(profileInput.Text));
+                if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) throw new FormatException("CR1 코드 또는 QR을 먼저 등록하세요.");
+                panel.Enabled = false;
+                var result = await RelayProbe.Run(host.Text.Trim(), (int)phonePort.Value, token.Text.Trim(), stage => phoneStatus.Text = "간편 연결: " + stage, closing.Token);
+                phoneStatus.Text = result; Log(result);
+                panel.Enabled = true; start.PerformClick();
+            } catch (OperationCanceledException) { }
+            catch (Exception e) when (e is IOException or FormatException) { phoneStatus.Text = "간편 연결 실패: " + e.Message; Log(phoneStatus.Text); }
+            finally { if (!IsDisposed) panel.Enabled = true; }
+        };
         var reveal = new CheckBox { Text = "연결 코드·키 보기 (화면 공유 시 주의)", AutoSize = true }; reveal.CheckedChanged += (_, _) => { profileInput.UseSystemPasswordChar = token.UseSystemPasswordChar = !reveal.Checked; }; panel.Controls.Add(reveal);
         panel.Controls.Add(new Label { Text = "직접 입력: CR1 코드가 없다면 아래 주소·실제 포트·연결 키만 입력하세요", AutoSize = true, Margin = new Padding(3, 12, 3, 6) });
         panel.Controls.Add(new Label { Text = "아이폰 주소", AutoSize = true }); panel.Controls.Add(host);
@@ -62,20 +95,42 @@ sealed class MainForm : Form
         Hint(); proxyPort.ValueChanged += (_, _) => Hint();
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
-        import.Click += (_, _) => { try { var profile = ConnectionProfile.Parse(profileInput.Text); host.Text = profile.Host; token.Text = profile.Token; phonePort.Value = profile.Port; profileInput.Clear(); Log("연결 정보를 적용했습니다. 아직 연결하지 않았습니다."); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.6 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        import.Click += (_, _) => { try { Apply(ConnectionProfile.Parse(profileInput.Text)); } catch (FormatException e) { MessageBox.Show(e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.7 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
         guideTab.Controls.Add(new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Text = "연결 방법\r\n\r\n1. 아이폰 앱에서 중계를 시작합니다.\r\n2. PC와 아이폰을 신뢰하는 USB/로컬 네트워크로 연결합니다.\r\n3. 아이폰의 CR1 연결 정보를 위에 붙여 넣고 적용합니다. 주소·키 직접 입력도 가능합니다.\r\n4. 아이폰 연결 검사 후 PC 중계를 시작합니다.\r\n5. 브라우저의 HTTP/HTTPS 프록시에 화면에 표시된 127.0.0.1 주소와 포트를 입력합니다.\r\n\r\n아이폰 0.4 백그라운드\r\n\r\niOS 허용 시간 동안 기존 연결만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지합니다. 앱을 다시 열면 자동 재개 설정에 따라 새로운 연결을 받습니다. 끊긴 업로드를 자동 재전송하지 않습니다. 무기한 백그라운드 동작은 지원하지 않습니다.\r\n\r\nPC 중계 시작은 로컬 프록시 수신 시작입니다. 아이폰 연결 성공 여부는 연결 검사를 따로 실행하세요. 검사 결과는 해당 시각의 결과입니다. 전송량은 통신사 데이터 집계값이 아닙니다.\r\n\r\n사용 후 브라우저 프록시를 복구하세요. 실제 기기 동작과 공유 데이터 미차감은 미검증입니다." });
         var connectionTab = new TabPage("연결 설정"); panel.Dock = DockStyle.Fill; connectionTab.Controls.Add(panel);
-        tabs.TabPages.AddRange([connectionTab, logTab, guideTab]); Controls.Add(tabs);
+        var udpTab = new TabPage("UDP · QUIC 전달");
+        var udpPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        var destination = new TextBox { Width = 320, PlaceholderText = "목적지 서버 호스트 또는 IP" };
+        var destinationPort = new NumericUpDown { Minimum = 1, Maximum = 65535, Value = 443, Width = 100 };
+        var localUdp = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 10800, Width = 100 };
+        var udpStart = new Button { Text = "UDP 전달 시작", AutoSize = true };
+        var udpStop = new Button { Text = "UDP 전달 중지", AutoSize = true, Enabled = false };
+        var udpStatus = new Label { AutoSize = true, MaximumSize = new Size(720, 0), Text = "중지됨" };
+        udpPanel.Controls.Add(new Label { AutoSize = true, MaximumSize = new Size(720, 0), Text = "목적지 고정 UDP 전달입니다. QUIC는 이 경로로 UDP 패킷을 전달합니다. 앱을 아래 로컬 포트로 보내도록 설정해야 합니다. QUIC의 원래 서버 이름·인증서 설정은 유지하세요. TCP 터널을 사용하므로 지연이 증가할 수 있습니다. 브라우저 HTTP 프록시는 QUIC를 자동 전달하지 않습니다." });
+        udpPanel.Controls.Add(new Label { Text = "목적지 서버", AutoSize = true }); udpPanel.Controls.Add(destination);
+        udpPanel.Controls.Add(new Label { Text = "목적지 UDP 포트", AutoSize = true }); udpPanel.Controls.Add(destinationPort);
+        udpPanel.Controls.Add(new Label { Text = "PC 로컬 UDP 포트", AutoSize = true }); udpPanel.Controls.Add(localUdp);
+        udpPanel.Controls.Add(udpStart); udpPanel.Controls.Add(udpStop); udpPanel.Controls.Add(udpStatus); udpTab.Controls.Add(udpPanel);
+        udpStart.Click += (_, _) => {
+            if (Uri.CheckHostName(destination.Text.Trim()) == UriHostNameType.Unknown || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) { MessageBox.Show("연결 정보와 목적지 서버를 먼저 입력하세요."); return; }
+            try {
+                datagrams = new DatagramRelay(host.Text.Trim(), (int)phonePort.Value, token.Text.Trim(), destination.Text.Trim(), (int)destinationPort.Value, (int)localUdp.Value, Log); datagrams.Start();
+                udpStatus.Text = $"수신 중: 127.0.0.1:{datagrams.Port} → {destination.Text.Trim()}:{destinationPort.Value} · 아이폰 연결은 첫 패킷 시 시작";
+                udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = false; udpStop.Enabled = true;
+            } catch (Exception e) when (e is SocketException or IOException) { datagrams?.Dispose(); datagrams = null; udpStatus.Text = "시작 실패: " + e.Message; }
+        };
+        udpStop.Click += (_, _) => { datagrams?.Dispose(); datagrams = null; udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = true; udpStop.Enabled = false; udpStatus.Text = "중지됨"; };
+        tabs.TabPages.AddRange([connectionTab, udpTab, logTab, guideTab]); Controls.Add(tabs);
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
             try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
             catch (Exception e) { proxy?.Dispose(); proxy = null; Log(e.Message); }
         };
-        stop.Click += (_, _) => Stop(); FormClosing += (_, _) => { closing.Cancel(); refresh.Stop(); refresh.Dispose(); proxy?.Dispose(); };
+        stop.Click += (_, _) => Stop(); FormClosing += (_, _) => { closing.Cancel(); datagrams?.Dispose(); refresh.Stop(); refresh.Dispose(); proxy?.Dispose(); };
         diagnose.Click += async (_, _) => {
             if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) { MessageBox.Show("아이폰 주소와 앱의 32자리 연결 키를 먼저 입력하세요."); return; }
             var probeHost = host.Text.Trim(); var probePort = (int)phonePort.Value; var probeKey = token.Text.Trim();
@@ -201,10 +256,13 @@ static class SelfTest
             await StabilityTests.Run();
             FeatureTests.Run();
             await ProbeTests.Run();
-            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback; HTTPS probe rejection, TLS failure stage, cancellation and reply redaction. iOS/device/carrier behavior NOT tested.");
+            await DatagramTests.Run();
+            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback; HTTPS probe rejection, TLS failure stage, cancellation and reply redaction; UDP frame boundaries/empty packet/echo; QR profile roundtrip and blank rejection. iOS/device/carrier behavior NOT tested.");
         }
         finally { fake.Stop(); }
     }
 }
+
+
 
 

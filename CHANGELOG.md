@@ -39,3 +39,10 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Untrusted relay rejection text is never copied into diagnostic logs.
 - iPhone displays cellular path availability; this is a path indication, not proof of Internet access or carrier accounting.
 - Regression coverage includes rejected relay replies, premature TLS closure, credential-safe errors, and cancellation.
+
+## 0.7.0
+- Quick connection applies a CR1 profile, checks actual HTTPS through the iPhone, then starts the PC TCP proxy.
+- iPhone shows a QR code containing the current CR1 profile. PC imports a QR image file or clipboard image; no camera scanning is included.
+- Adds loopback UDP forwarding to a fixed remote host/port through authenticated, length-framed TCP to the iPhone cellular UDP socket. Supports up to 16 PC source endpoints, bounded queues and idle cleanup.
+- QUIC UDP payloads can use this forwarding path when the client can direct traffic to the local port while retaining the original server identity. This is not a native QUIC transport, SOCKS UDP proxy, or automatic browser HTTP/3 integration. TCP tunneling can increase latency.
+- UDP and QR need the matching 0.7 iPhone build. Existing TCP clients remain compatible.
