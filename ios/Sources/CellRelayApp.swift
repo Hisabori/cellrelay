@@ -12,6 +12,7 @@ import Darwin
                 Form {
                     Section("연결") {
                         Text(relay.status)
+                        Text(relay.cellularStatus).font(.caption)
                         LabeledContent("실제 중계 포트", value: relay.listenPort == 0 ? "대기 중" : String(relay.listenPort))
                         LabeledContent("로컬 주소", value: relay.addresses)
                         ConnectionSetupView(relay: relay)
@@ -80,6 +81,16 @@ final class Relay: ObservableObject {
     @Published var backgroundStatus = "화면 활성 상태"
     @Published var listenPort: UInt16 = 0
     @Published var selectedHost = ""
+    @Published var cellularStatus = "셀룰러 경로 확인 중"
+    private let cellularMonitor = NWPathMonitor(requiredInterfaceType: .cellular)
+    init() {
+        cellularMonitor.pathUpdateHandler = { [weak self] path in
+            let text = path.status == .satisfied ? "셀룰러 경로 사용 가능 · 실제 인터넷은 PC에서 검사" : "셀룰러 경로 사용 불가 · 모바일 데이터 설정 확인"
+            DispatchQueue.main.async { self?.cellularStatus = text }
+        }
+        cellularMonitor.start(queue: queue)
+    }
+    deinit { cellularMonitor.cancel() }
     @Published var autoResume = true
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var backgroundGeneration: UUID?
@@ -349,3 +360,4 @@ private final class Session {
         client.cancel(); upstream?.cancel(); ended()
     }
 }
+

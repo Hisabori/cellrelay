@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'ios/**'
+      - 'windows/**'
       - '.github/workflows/ios-ipa.yml'
   workflow_dispatch:
 permissions:
@@ -69,3 +70,4 @@ jobs:
             ios/build/IPA-validation.json
           if-no-files-found: error
           retention-days: 14
+

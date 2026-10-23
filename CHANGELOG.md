@@ -33,3 +33,9 @@ iOS 소스: 키 복사/재발급, 활동·전송량 표시, 리스너 재시작 
 
 Windows 회귀 시험은 VALIDATION.txt와 self-test-result.txt를 참고하세요.
 iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 별도 검증 대상입니다.
+
+## 0.6.0
+- PC connection diagnostics now verify relay acceptance, TLS certificate validation, and an actual HTTPS HEAD response from example.com, with a 25-second total deadline and failure-stage display.
+- Untrusted relay rejection text is never copied into diagnostic logs.
+- iPhone displays cellular path availability; this is a path indication, not proof of Internet access or carrier accounting.
+- Regression coverage includes rejected relay replies, premature TLS closure, credential-safe errors, and cancellation.

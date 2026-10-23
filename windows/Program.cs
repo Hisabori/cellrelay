@@ -37,7 +37,7 @@ sealed class MainForm : Form
     Proxy? proxy;
     public MainForm()
     {
-        Text = "CellRelay 0.5 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.6 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
@@ -63,7 +63,7 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { var profile = ConnectionProfile.Parse(profileInput.Text); host.Text = profile.Host; token.Text = profile.Token; phonePort.Value = profile.Port; profileInput.Clear(); Log("연결 정보를 적용했습니다. 아직 연결하지 않았습니다."); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.4 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.6 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
@@ -78,18 +78,14 @@ sealed class MainForm : Form
         stop.Click += (_, _) => Stop(); FormClosing += (_, _) => { closing.Cancel(); refresh.Stop(); refresh.Dispose(); proxy?.Dispose(); };
         diagnose.Click += async (_, _) => {
             if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) { MessageBox.Show("아이폰 주소와 앱의 32자리 연결 키를 먼저 입력하세요."); return; }
-            diagnose.Enabled = false; phoneStatus.Text = "아이폰 연결 검사 중…";
+            var probeHost = host.Text.Trim(); var probePort = (int)phonePort.Value; var probeKey = token.Text.Trim();
+            diagnose.Enabled = false;
             try {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(closing.Token); timeout.CancelAfter(TimeSpan.FromSeconds(10)); using var phone = new TcpClient();
-                var elapsed = System.Diagnostics.Stopwatch.StartNew();
-                try { await phone.ConnectAsync(host.Text.Trim(), (int)phonePort.Value, timeout.Token); }
-                catch (Exception e) when (e is SocketException or OperationCanceledException) { throw new IOException("PC에서 아이폰 앱에 도달하지 못했습니다. 같은 핫스팟 연결, 아이폰 앱의 현재 포트와 화면 상태를 확인하세요.", e); }
-                var stream = phone.GetStream();
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { token = token.Text.Trim(), host = "example.com", port = 443 }) + "\n"), timeout.Token);
-                var result = await Proxy.ReadLine(stream, timeout.Token);
-                if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: " + (result == "OK" ? $"성공 · {elapsed.ElapsedMilliseconds} ms" : "거절 · 아이폰 앱 상태 확인");
-                Log(result == "OK" ? $"검사 성공 ({elapsed.ElapsedMilliseconds} ms): 아이폰 인증 및 example.com:443 셀룰러 TCP 연결. 데이터 차감 결과는 별도 확인하세요." : "검사 거절: " + result);
-            } catch (Exception e) when (e is SocketException or IOException or OperationCanceledException) { if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: 실패 · 아이폰 앱과 주소를 확인하세요"; Log("검사 실패: " + (e is OperationCanceledException ? "10초 응답 시간 초과" : e.Message)); }
+                var result = await RelayProbe.Run(probeHost, probePort, probeKey, stage => { if (!IsDisposed) phoneStatus.Text = "검사 중: " + stage; }, closing.Token);
+                if (!IsDisposed) phoneStatus.Text = $"마지막 검사 {DateTime.Now:HH:mm:ss}: {result}";
+                Log(result + " · 아이폰 중계 경로 검사. 브라우저 설정·통신사 집계는 별도 확인하세요.");
+            } catch (OperationCanceledException) { }
+            catch (IOException e) { if (!IsDisposed) phoneStatus.Text = "검사 실패: " + e.Message; Log("검사 실패: " + e.Message); }
             finally { if (!IsDisposed) diagnose.Enabled = true; }
         };
         refresh.Tick += (_, _) => { if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
@@ -204,8 +200,11 @@ static class SelfTest
             await server;
             await StabilityTests.Run();
             FeatureTests.Run();
-            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback. iOS/device/carrier behavior NOT tested.");
+            await ProbeTests.Run();
+            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback; HTTPS probe rejection, TLS failure stage, cancellation and reply redaction. iOS/device/carrier behavior NOT tested.");
         }
         finally { fake.Stop(); }
     }
 }
+
+
