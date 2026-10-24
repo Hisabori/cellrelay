@@ -1,4 +1,6 @@
-# CellRelay 0.7 — 아이폰 셀룰러 중계 실험
+# CellRelay 0.8 — 아이폰 셀룰러 중계 실험
+
+게임 모드: GAME-MODE.txt에 따라 공식 터널 엔진을 별도 준비한 뒤 앱을 관리자 권한으로 실행합니다. 지포스 나우 지원은 실험 단계이며 PC 전체 TCP·UDP와 DNS 경로에 영향을 줍니다. 아이폰 앱은 0.7을 계속 사용합니다.
 
 간편 연결: CR1 코드 또는 QR 이미지를 등록한 뒤 '코드 적용 · 검사 · 간편 연결'을 누르면 HTTPS 검사 후 PC 프록시를 시작합니다. 브라우저 프록시는 화면의 로컬 주소로 설정하세요.
 
@@ -85,4 +87,5 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+
 

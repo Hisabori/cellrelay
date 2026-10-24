@@ -46,3 +46,9 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Adds loopback UDP forwarding to a fixed remote host/port through authenticated, length-framed TCP to the iPhone cellular UDP socket. Supports up to 16 PC source endpoints, bounded queues and idle cleanup.
 - QUIC UDP payloads can use this forwarding path when the client can direct traffic to the local port while retaining the original server identity. This is not a native QUIC transport, SOCKS UDP proxy, or automatic browser HTTP/3 integration. TCP tunneling can increase latency.
 - UDP and QR need the matching 0.7 iPhone build. Existing TCP clients remain compatible.
+
+## 0.8.0 (PC)
+- Experimental whole-PC game mode using an external sing-box TUN engine and local SOCKS5 TCP/UDP relay. Requires administrator rights and manual official engine preparation; see GAME-MODE.txt.
+- Dynamic IPv4/IPv6/domain destinations, TCP half-close, loopback-pinned UDP associations, bounded flows/queues, idle cleanup and UDP fragment rejection.
+- Validates the iPhone HTTPS path and engine configuration before starting. Phone and loopback routes are excluded to avoid recursive tunneling; DNS uses the cellular SOCKS path.
+- iPhone 0.7 remains compatible. Real TUN activation/removal, device cellular routing, GeForce NOW gameplay and carrier accounting remain unverified. UDP travels over TCP between PC and iPhone and may add latency.
