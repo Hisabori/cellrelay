@@ -52,3 +52,8 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Dynamic IPv4/IPv6/domain destinations, TCP half-close, loopback-pinned UDP associations, bounded flows/queues, idle cleanup and UDP fragment rejection.
 - Validates the iPhone HTTPS path and engine configuration before starting. Phone and loopback routes are excluded to avoid recursive tunneling; DNS uses the cellular SOCKS path.
 - iPhone 0.7 remains compatible. Real TUN activation/removal, device cellular routing, GeForce NOW gameplay and carrier accounting remain unverified. UDP travels over TCP between PC and iPhone and may add latency.
+
+## 0.8.1 (PC)
+- Opens the game-mode tab by default. The quick-connect button now starts the game-mode flow, including its existing HTTPS preflight and engine configuration check.
+- Adds a direct QR/CR1 registration button on the default screen and corrects manual engine/administrator instructions.
+- No tunnel starts merely by opening the app; the user starts it with the connection button. Existing TCP proxy and fixed UDP forwarding remain available.

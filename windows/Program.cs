@@ -21,7 +21,7 @@ sealed class MainForm : Form
     readonly TextBox host = new() { Text = "172.20.10.1", Width = 210 };
     readonly TextBox token = new() { Width = 350, UseSystemPasswordChar = true };
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
-    readonly Button start = new() { Text = "중계 시작", AutoSize = true };
+    readonly Button start = new() { Text = "TCP 프록시 시작", AutoSize = true };
     readonly Button stop = new() { Text = "중지", Enabled = false, AutoSize = true };
     readonly Button diagnose = new() { Text = "아이폰 연결 검사", AutoSize = true };
     readonly NumericUpDown proxyPort = new() { Minimum = 1024, Maximum = 65535, Value = 8877, Width = 100 };
@@ -39,15 +39,15 @@ sealed class MainForm : Form
     GameModePanel? game;
     public MainForm()
     {
-        Text = "CellRelay 0.8 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.8.1 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         panel.Controls.Add(new Label { Text = "CellRelay · 아이폰 셀룰러 연결", Font = new Font(Font.FontFamily, 15F, FontStyle.Bold), AutoSize = true });
-        panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② 연결 정보 적용 → ③ PC 중계 시작 → ④ 브라우저 프록시 설정", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
+        panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② QR·CR1 등록 → ③ 간편 연결 · 게임 모드", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
         panel.Controls.Add(new Label { Text = "CR1 코드로 입력: 아이폰의 'PC용 CR1 연결 코드 전체 복사'를 사용하세요", AutoSize = true });
         var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
-        var easy = new Button { Text = "코드 적용 · 검사 · 간편 연결", AutoSize = true };
+        var easy = new Button { Text = "간편 연결 · 게임 모드", AutoSize = true };
         var qr = new Button { Text = "QR 이미지로 등록", AutoSize = true };
         var qrClipboard = new Button { Text = "클립보드 QR 등록", AutoSize = true };
         var quickRow = new FlowLayoutPanel { AutoSize = true }; quickRow.Controls.AddRange([easy, qr, qrClipboard]); panel.Controls.Add(quickRow);
@@ -66,18 +66,13 @@ sealed class MainForm : Form
             try { using var source = Clipboard.GetImage(); if (source is null) throw new FormatException("클립보드에 QR 이미지가 없습니다. 아이폰 QR 화면 이미지를 복사하세요."); using var image = new Bitmap(source); Apply(QrProfile.Read(image)); }
             catch (Exception e) when (e is FormatException or ArgumentException or System.Runtime.InteropServices.ExternalException) { MessageBox.Show("QR 등록 실패: " + e.Message); }
         };
-        easy.Click += async (_, _) => {
+        easy.Click += (_, _) => {
             if (proxy != null || datagrams != null || game?.Active == true) { MessageBox.Show("실행 중인 중계를 먼저 중지하세요."); return; }
             try {
                 if (!string.IsNullOrWhiteSpace(profileInput.Text)) Apply(ConnectionProfile.Parse(profileInput.Text));
                 if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) throw new FormatException("CR1 코드 또는 QR을 먼저 등록하세요.");
-                panel.Enabled = false;
-                var result = await RelayProbe.Run(host.Text.Trim(), (int)phonePort.Value, token.Text.Trim(), stage => phoneStatus.Text = "간편 연결: " + stage, closing.Token);
-                phoneStatus.Text = result; Log(result);
-                panel.Enabled = true; start.PerformClick();
-            } catch (OperationCanceledException) { }
-            catch (Exception e) when (e is IOException or FormatException) { phoneStatus.Text = "간편 연결 실패: " + e.Message; Log(phoneStatus.Text); }
-            finally { if (!IsDisposed) panel.Enabled = true; }
+                game?.RequestStart();
+            } catch (FormatException e) { MessageBox.Show(e.Message); }
         };
         var reveal = new CheckBox { Text = "연결 코드·키 보기 (화면 공유 시 주의)", AutoSize = true }; reveal.CheckedChanged += (_, _) => { profileInput.UseSystemPasswordChar = token.UseSystemPasswordChar = !reveal.Checked; }; panel.Controls.Add(reveal);
         panel.Controls.Add(new Label { Text = "직접 입력: CR1 코드가 없다면 아래 주소·실제 포트·연결 키만 입력하세요", AutoSize = true, Margin = new Padding(3, 12, 3, 6) });
@@ -97,7 +92,7 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { Apply(ConnectionProfile.Parse(profileInput.Text)); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.8 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.8.1 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
@@ -129,9 +124,9 @@ sealed class MainForm : Form
         game=new GameModePanel(()=> {
             if(token.Text.Trim().Length!=32 || !token.Text.Trim().All(Uri.IsHexDigit))throw new FormatException("QR 또는 CR1 연결 정보를 먼저 등록하세요.");
             return new ConnectionProfile(host.Text.Trim(),token.Text.Trim(),(int)phonePort.Value);
-        },Log);
+        },Log,()=>tabs.SelectedTab=connectionTab);
         gameTab.Controls.Add(game);
-        tabs.TabPages.AddRange([connectionTab, gameTab, udpTab, logTab, guideTab]); Controls.Add(tabs);
+        tabs.TabPages.AddRange([connectionTab, gameTab, udpTab, logTab, guideTab]); Controls.Add(tabs); tabs.SelectedTab=gameTab;
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
             try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
@@ -270,6 +265,8 @@ static class SelfTest
         finally { fake.Stop(); }
     }
 }
+
+
 
 
 
