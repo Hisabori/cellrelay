@@ -57,3 +57,10 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Opens the game-mode tab by default. The quick-connect button now starts the game-mode flow, including its existing HTTPS preflight and engine configuration check.
 - Adds a direct QR/CR1 registration button on the default screen and corrects manual engine/administrator instructions.
 - No tunnel starts merely by opening the app; the user starts it with the connection button. Existing TCP proxy and fixed UDP forwarding remain available.
+
+## 0.8.2 (PC)
+- Displays connection profile status, required engine files and Administrator status on the default game screen, with a refresh button.
+- Adds three visible startup stages and a cancel button while the HTTPS probe, engine configuration check or engine launch is pending.
+- Limits engine configuration checks to 10 seconds, drains bounded output and terminates the owned check process on timeout/cancellation.
+- Prevents the exit monitor from disposing an engine while the startup code still checks its result.
+- Adds real subprocess regression checks for failed exit codes, timeout cleanup and user cancellation. TUN, gameplay and carrier verification still require a device.
