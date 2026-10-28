@@ -4,8 +4,8 @@ using System.Security.Principal;
 namespace CellRelay;
 sealed class GameModePanel : UserControl
 {
-    readonly Button start=new(){Text="게임 모드 시작 (전체 TCP·UDP)",AutoSize=true};
-    readonly Button stop=new(){Text="게임 모드 중지",AutoSize=true,Enabled=false};
+    readonly Button start=new(){Text="VPN 터널 시작 (전체 TCP·UDP)",AutoSize=true};
+    readonly Button stop=new(){Text="VPN 터널 중지",AutoSize=true,Enabled=false};
     readonly Label status=new(){Text="중지됨",AutoSize=true,MaximumSize=new Size(720,0)};
     readonly Label readiness=new(){AutoSize=true,MaximumSize=new Size(720,0)};
     readonly CancellationTokenSource closing=new();
@@ -20,7 +20,7 @@ sealed class GameModePanel : UserControl
     {
         this.log=log;this.profile=profile;Dock=DockStyle.Fill;
         var panel=new FlowLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(16),FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};
-        panel.Controls.Add(new Label {AutoSize=true,MaximumSize=new Size(720,0),Text="아이폰 0.7 이상에서 중계를 켜고 QR/CR1 연결 정보를 등록하세요. 게임 모드는 PC 전체 TCP·UDP와 DNS를 아이폰 중계로 전달합니다. 관리자 권한이 필요하며 다른 VPN은 종료한 상태로 시작하세요."});
+        panel.Controls.Add(new Label {AutoSize=true,MaximumSize=new Size(720,0),Text="아이폰 0.7 이상에서 중계를 켜고 QR/CR1 연결 정보를 등록하세요. VPN 터널 모드는 PC 전체 TCP·UDP와 DNS를 아이폰 중계로 전달합니다. 관리자 권한이 필요하며 다른 VPN은 종료한 상태로 시작하세요."});
         panel.Controls.Add(readiness);
         var ready=new Button {Text="준비 상태 새로고침",AutoSize=true};ready.Click+=(_,_)=>RefreshReadiness();panel.Controls.Add(ready);
         var pairing=new Button {Text="QR · CR1 연결 정보 등록",AutoSize=true};pairing.Click+=(_,_)=>register();panel.Controls.Add(pairing);
@@ -73,13 +73,15 @@ sealed class GameModePanel : UserControl
         catch(Exception e)when(e is IOException or FormatException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException){outcome="시작 실패: "+e.Message;log(outcome);}
         finally{
             starting=null;if(!running)Cleanup();
-            if(!IsDisposed){status.Text=outcome;start.Enabled=!running;stop.Enabled=running;stop.Text="게임 모드 중지";RefreshReadiness();}
+            if(!IsDisposed){status.Text=outcome;start.Enabled=!running;stop.Enabled=running;stop.Text="VPN 터널 중지";RefreshReadiness();}
         }
     }
+    public void RequestStop(){if(starting!=null){starting.Cancel();stop.Enabled=false;status.Text="시작 취소 중 · 정리합니다.";}else{Cleanup();SetIdle("중지됨 · 터널 엔진 종료");}}
     public void RequestStart(){if(Parent is TabPage page&&page.Parent is TabControl tabs)tabs.SelectedTab=page;start.PerformClick();}
-    void SetIdle(string message){if(!IsDisposed){start.Enabled=true;stop.Enabled=false;stop.Text="게임 모드 중지";status.Text=message;RefreshReadiness();}}
+    void SetIdle(string message){if(!IsDisposed){start.Enabled=true;stop.Enabled=false;stop.Text="VPN 터널 중지";status.Text=message;RefreshReadiness();}}
     void Cleanup(){
         if(engine!=null){try{if(!engine.HasExited){engine.Kill(entireProcessTree:true);engine.WaitForExit(5000);}}catch(InvalidOperationException){}finally{engine.Dispose();engine=null;}}
         socks?.Dispose();socks=null;
     }
 }
+

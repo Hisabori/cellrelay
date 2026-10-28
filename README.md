@@ -1,12 +1,19 @@
-# CellRelay 0.8.2 — 아이폰 셀룰러 중계 실험
+# CellRelay 0.9 — TCP · UDP · VPN 터널
 
-기본 연결은 게임 모드입니다. 첫 화면에서 연결 정보·엔진 파일·관리자 권한을 확인할 수 있고, 시작 중 취소 버튼으로 진행 중인 검사를 취소할 수 있습니다. 첫 화면의 QR · CR1 연결 정보 등록으로 정보를 입력한 뒤 간편 연결 · 게임 모드를 누릅니다. 게임 모드: GAME-MODE.txt에 따라 공식 터널 엔진을 별도 준비한 뒤 앱을 관리자 권한으로 실행합니다. 지포스 나우 지원은 실험 단계이며 PC 전체 TCP·UDP와 DNS 경로에 영향을 줍니다. 아이폰 앱은 0.7을 계속 사용합니다.
+아이폰 중계를 시작하고 PC의 연결 설정에서 QR 이미지/클립보드 QR/CR1 코드를 등록합니다. 연결 방식을 선택한 뒤 선택한 방식으로 연결을 누르세요. 기본 화면은 VPN 터널입니다.
 
-간편 연결: CR1 코드 또는 QR 이미지를 등록한 뒤 '코드 적용 · 검사 · 간편 연결'을 누르면 HTTPS 검사 후 PC 프록시를 시작합니다. 브라우저 프록시는 화면의 로컬 주소로 설정하세요.
+| 방식 | 사용 방법 | 준비 |
+|---|---|---|
+| TCP HTTP/HTTPS | 브라우저 프록시를 화면의 127.0.0.1 주소로 설정 | 아이폰 연결 정보 |
+| TCP+UDP SOCKS5 | 앱의 SOCKS5 서버를 화면의 주소로 설정 | 앱에서 SOCKS5/UDP ASSOCIATE 지원 |
+| UDP 목적지 전달 | 고정 목적지와 로컬 포트를 설정한 뒤 앱에서 로컬 포트로 전송 | 아이폰 0.7 이상 |
+| VPN 전체 TCP/UDP | 가상 어댑터로 PC 전체 TCP/UDP와 DNS 전달 | 관리자 권한, 별도 준비한 터널 엔진 |
 
-QR 등록: 아이폰에서 'PC 등록용 QR 보기'를 누르고 화면을 캡처하여 본인 PC로 전달합니다. PC에서 'QR 이미지로 등록'으로 열거나 이미지를 복사하고 '클립보드 QR 등록'을 누릅니다. QR에는 연결 키가 포함됩니다. 카메라 스캔은 포함하지 않습니다.
+상단 상태는 수신 또는 엔진 시작/실행 상태입니다. 실제 인터넷 연결 성공을 뜻하지 않습니다. 모든 연결 중지로 각 중계와 진행 중인 VPN 시작을 중지할 수 있습니다.
 
-UDP · QUIC 전달 탭: 목적지 호스트와 UDP 포트, PC 로컬 수신 포트를 입력합니다. 앱에서 로컬 포트로 보낸 UDP 패킷을 아이폰의 셀룰러로 전달합니다. QUIC 클라이언트는 원래 서버 이름과 인증서 검증을 유지한 채 목적지 주소만 바꿀 수 있어야 합니다. 네이티브 QUIC 터널이나 브라우저 자동 HTTP/3 전환은 구현하지 않았습니다. TCP 터널의 재전송 대기 때문에 지연이 증가할 수 있습니다. UDP 지원에는 0.7 IPA가 필요합니다.
+VPN은 아이폰 중계로 보내는 기존 TUN 모드입니다. 외부 WireGuard/OpenVPN 프로필 연결, ICMP 및 외부에서 먼저 시작하는 연결은 지원하지 않습니다. PC-아이폰 구간은 암호화된 VPN 전송을 제공하지 않으며 HTTPS 자체의 TLS는 유지됩니다. UDP는 이 구간에서 TCP 터널로 전달되어 지연이 증가할 수 있습니다.
+
+QR에는 연결 키가 포함됩니다. 카메라 스캔 대신 QR 이미지 파일 또는 클립보드 이미지를 로컬에서 읽습니다. 통신사 공유 데이터 미차감과 실제 게임·VPN 동작은 미검증입니다. 아이폰은 0.7을 계속 사용합니다.
 
 Windows HTTP/HTTPS 프록시 → 로컬 TCP 연결 → 아이폰 앱 → 셀룰러 TCP 연결.
 아이폰의 출구는 Network.framework의 `requiredInterfaceType = .cellular`로 제한합니다. 셀룰러 경로가 없으면 연결 실패하며 PC에서 직접 인터넷으로 우회하지 않습니다.
@@ -87,6 +94,7 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+
 
 
 

@@ -64,3 +64,10 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Limits engine configuration checks to 10 seconds, drains bounded output and terminates the owned check process on timeout/cancellation.
 - Prevents the exit monitor from disposing an engine while the startup code still checks its result.
 - Adds real subprocess regression checks for failed exit codes, timeout cleanup and user cancellation. TUN, gameplay and carrier verification still require a device.
+
+## 0.9.0 (PC)
+- Adds an explicit VPN/TCP/SOCKS5/UDP connection-mode selector to quick connect.
+- Exposes the existing dynamic SOCKS5 TCP CONNECT and UDP ASSOCIATE relay as a standalone loopback listener, without Administrator or a TUN engine. Supports destination applications that implement SOCKS5 UDP forwarding.
+- Adds a global listener/startup status bar and a stop-all button that stops HTTP, fixed UDP, SOCKS5 and the VPN tunnel, or cancels pending tunnel startup.
+- VPN means the existing sing-box TUN integration forwarding whole-PC TCP/UDP/DNS through the iPhone. External OpenVPN/WireGuard profiles, ICMP, unsolicited inbound connections and an encrypted PC-iPhone VPN transport are not implemented.
+- iPhone 0.7 remains compatible. Real device routing, VPN restoration, gameplay and carrier accounting remain unverified.

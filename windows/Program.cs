@@ -37,24 +37,29 @@ sealed class MainForm : Form
     Proxy? proxy;
     DatagramRelay? datagrams;
     GameModePanel? game;
+    SocksModePanel? socksMode;
     public MainForm()
     {
-        Text = "CellRelay 0.8.2 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.9 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         panel.Controls.Add(new Label { Text = "CellRelay · 아이폰 셀룰러 연결", Font = new Font(Font.FontFamily, 15F, FontStyle.Bold), AutoSize = true });
-        panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② QR·CR1 등록 → ③ 간편 연결 · 게임 모드", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
+        panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② QR·CR1 등록 → ③ 연결 방식 선택 → 연결", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
         panel.Controls.Add(new Label { Text = "CR1 코드로 입력: 아이폰의 'PC용 CR1 연결 코드 전체 복사'를 사용하세요", AutoSize = true });
         var profileRow = new FlowLayoutPanel { AutoSize = true }; profileRow.Controls.AddRange([profileInput, import]); panel.Controls.Add(profileRow);
-        var easy = new Button { Text = "간편 연결 · 게임 모드", AutoSize = true };
+        var mode=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=420};
+        mode.Items.AddRange(new object[]{"VPN · 전체 TCP/UDP 터널","TCP · HTTP/HTTPS 프록시","TCP + UDP · SOCKS5","UDP · 목적지 전달"});mode.SelectedIndex=0;
+        panel.Controls.Add(new Label {Text="연결 방식",AutoSize=true});panel.Controls.Add(mode);
+        Action openUdp=()=>{};
+        var easy = new Button { Text = "선택한 방식으로 연결", AutoSize = true };
         var qr = new Button { Text = "QR 이미지로 등록", AutoSize = true };
         var qrClipboard = new Button { Text = "클립보드 QR 등록", AutoSize = true };
         var quickRow = new FlowLayoutPanel { AutoSize = true }; quickRow.Controls.AddRange([easy, qr, qrClipboard]); panel.Controls.Add(quickRow);
         void Apply(ConnectionProfile profile) {
-            if (proxy != null || datagrams != null || game?.Active == true) throw new FormatException("실행 중인 중계를 먼저 중지하세요.");
+            if (proxy != null || datagrams != null || game?.Active == true || socksMode?.Active == true) throw new FormatException("실행 중인 중계를 먼저 중지하세요.");
             host.Text = profile.Host; token.Text = profile.Token; phonePort.Value = profile.Port; profileInput.Clear();
-            Log("연결 정보를 적용했습니다. 간편 연결 또는 중계 시작을 누르세요.");
+            Log("연결 정보를 적용했습니다. 연결 방식을 선택하고 연결 버튼을 누르세요.");
         }
         qr.Click += (_, _) => {
             using var picker = new OpenFileDialog { Filter = "QR 이미지|*.png;*.jpg;*.jpeg;*.bmp", CheckFileExists = true };
@@ -67,11 +72,16 @@ sealed class MainForm : Form
             catch (Exception e) when (e is FormatException or ArgumentException or System.Runtime.InteropServices.ExternalException) { MessageBox.Show("QR 등록 실패: " + e.Message); }
         };
         easy.Click += (_, _) => {
-            if (proxy != null || datagrams != null || game?.Active == true) { MessageBox.Show("실행 중인 중계를 먼저 중지하세요."); return; }
+            if (proxy != null || datagrams != null || game?.Active == true || socksMode?.Active == true) { MessageBox.Show("실행 중인 중계를 먼저 중지하세요."); return; }
             try {
                 if (!string.IsNullOrWhiteSpace(profileInput.Text)) Apply(ConnectionProfile.Parse(profileInput.Text));
                 if (Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown || token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit)) throw new FormatException("CR1 코드 또는 QR을 먼저 등록하세요.");
-                game?.RequestStart();
+                switch(mode.SelectedIndex){
+                    case 0:game?.RequestStart();break;
+                    case 1:start.PerformClick();break;
+                    case 2:socksMode?.RequestStart();break;
+                    case 3:openUdp();break;
+                }
             } catch (FormatException e) { MessageBox.Show(e.Message); }
         };
         var reveal = new CheckBox { Text = "연결 코드·키 보기 (화면 공유 시 주의)", AutoSize = true }; reveal.CheckedChanged += (_, _) => { profileInput.UseSystemPasswordChar = token.UseSystemPasswordChar = !reveal.Checked; }; panel.Controls.Add(reveal);
@@ -92,7 +102,7 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { Apply(ConnectionProfile.Parse(profileInput.Text)); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.8.2 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.9 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
@@ -120,13 +130,24 @@ sealed class MainForm : Form
             } catch (Exception e) when (e is SocketException or IOException) { datagrams?.Dispose(); datagrams = null; udpStatus.Text = "시작 실패: " + e.Message; }
         };
         udpStop.Click += (_, _) => { datagrams?.Dispose(); datagrams = null; udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = true; udpStop.Enabled = false; udpStatus.Text = "중지됨"; };
-        var gameTab=new TabPage("게임 모드 · 지포스 나우");
+        var gameTab=new TabPage("VPN · 전체 TCP/UDP");
         game=new GameModePanel(()=> {
             if(token.Text.Trim().Length!=32 || !token.Text.Trim().All(Uri.IsHexDigit))throw new FormatException("QR 또는 CR1 연결 정보를 먼저 등록하세요.");
             return new ConnectionProfile(host.Text.Trim(),token.Text.Trim(),(int)phonePort.Value);
         },Log,()=>tabs.SelectedTab=connectionTab);
         gameTab.Controls.Add(game);
-        tabs.TabPages.AddRange([connectionTab, gameTab, udpTab, logTab, guideTab]); Controls.Add(tabs); tabs.SelectedTab=gameTab;
+        var socksTab=new TabPage("TCP·UDP SOCKS5");
+        socksMode=new SocksModePanel(()=>{
+            if(token.Text.Trim().Length!=32||!token.Text.Trim().All(Uri.IsHexDigit))throw new FormatException("QR 또는 CR1 연결 정보를 먼저 등록하세요.");
+            return new ConnectionProfile(host.Text.Trim(),token.Text.Trim(),(int)phonePort.Value);
+        },Log,()=>tabs.SelectedTab=connectionTab);socksTab.Controls.Add(socksMode);
+        openUdp=()=>{tabs.SelectedTab=udpTab;udpStart.PerformClick();};
+        var stopAll=new Button {Text="모든 연결 중지",AutoSize=true};
+        var modesStatus=new Label {AutoSize=true,MaximumSize=new Size(710,0)};
+        var bar=new FlowLayoutPanel {Dock=DockStyle.Top,AutoSize=true,Padding=new Padding(8)};bar.Controls.Add(stopAll);bar.Controls.Add(modesStatus);
+        stopAll.Click+=(_,_)=>{Stop();if(udpStop.Enabled)udpStop.PerformClick();socksMode.RequestStop();game.RequestStop();};
+        Controls.Add(bar);
+        tabs.TabPages.AddRange([connectionTab, gameTab, socksTab, udpTab, logTab, guideTab]); Controls.Add(tabs);bar.BringToFront(); tabs.SelectedTab=gameTab;
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
             try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
@@ -145,7 +166,7 @@ sealed class MainForm : Form
             catch (IOException e) { if (!IsDisposed) phoneStatus.Text = "검사 실패: " + e.Message; Log("검사 실패: " + e.Message); }
             finally { if (!IsDisposed) diagnose.Enabled = true; }
         };
-        refresh.Tick += (_, _) => { if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
+        refresh.Tick += (_, _) => { modesStatus.Text=$"TCP {(proxy!=null?"수신 중":"중지")} · UDP {(datagrams!=null?"수신 중":"중지")} · SOCKS5 {(socksMode.Active?"수신 중":"중지")} · VPN {(game.Active?"시작/실행 중":"중지")}"; if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
     }
     void Stop() { var final = proxy?.Summary; proxy?.Dispose(); proxy = null; start.Enabled = true; stop.Enabled = false; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = true; statistics.Text = "중지됨"; Log("중지됨 · " + final); }
     void Log(string s) { if (IsDisposed || !IsHandleCreated) return; try { BeginInvoke(new Action(() => { if (IsDisposed) return; if (log.TextLength > 32000) log.Text = log.Text[^16000..]; log.AppendText($"{DateTime.Now:HH:mm:ss} {s}\r\n"); })); } catch (InvalidOperationException) { } }
@@ -266,6 +287,7 @@ static class SelfTest
         finally { fake.Stop(); }
     }
 }
+
 
 
 
