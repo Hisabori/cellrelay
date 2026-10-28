@@ -23,9 +23,16 @@ static class EngineProcess
             throw new IOException("엔진 설정 검사 시간 초과 · 검사 프로세스를 정리했습니다.");
         }
     }
+    internal static bool TryStop(Process process,out string error){
+        error="";
+        try{if(!process.HasExited){process.Kill(entireProcessTree:true);if(!process.WaitForExit(5000)){error="엔진 종료 대기 시간이 초과됐습니다.";return false;}}return true;}
+        catch(InvalidOperationException){return true;}
+        catch(System.ComponentModel.Win32Exception e){error="엔진 종료 실패: "+e.Message;return false;}
+    }
     static async Task<string> Tail(StreamReader reader) {
         char[] buffer=new char[1024];string tail="";int count;
         while((count=await reader.ReadAsync(buffer))>0){tail+=new string(buffer,0,count);if(tail.Length>4096)tail=tail[^4096..];}
         return tail;
     }
 }
+

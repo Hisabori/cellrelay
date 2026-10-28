@@ -1,4 +1,4 @@
-# CellRelay 0.9 — TCP · UDP · VPN 터널
+# CellRelay 0.9.1 — TCP · UDP · VPN 터널
 
 아이폰 중계를 시작하고 PC의 연결 설정에서 QR 이미지/클립보드 QR/CR1 코드를 등록합니다. 연결 방식을 선택한 뒤 선택한 방식으로 연결을 누르세요. 기본 화면은 VPN 터널입니다.
 
@@ -94,6 +94,7 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+
 
 
 

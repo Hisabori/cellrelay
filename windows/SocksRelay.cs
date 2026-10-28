@@ -12,10 +12,13 @@ sealed class SocksRelay(ConnectionProfile profile, Action<string> log) : IDispos
     readonly CancellationTokenSource stop = new();
     readonly SemaphoreSlim sessions = new(32);
     readonly SemaphoreSlim flows = new(24);
+    readonly object lifecycle=new();
+    int state,active;
+    internal int ActiveSessions=>Volatile.Read(ref active);
     public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
-    public void Start() { listener.Start(); _ = Accept(); }
+    public void Start() { lock(lifecycle){if(state!=0)throw new InvalidOperationException("SOCKS listener already started or disposed");listener.Start();state=1;_ = Accept();} }
     async Task Accept() {
-        try { while (!stop.IsCancellationRequested) { var c = await listener.AcceptTcpClientAsync(stop.Token); if (!sessions.Wait(0)) { c.Dispose(); continue; } _ = Handle(c); } }
+        try { while (!stop.IsCancellationRequested) { var c = await listener.AcceptTcpClientAsync(stop.Token); if (!sessions.Wait(0)) { c.Dispose(); continue; } Interlocked.Increment(ref active); _ = Handle(c); } }
         catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException) { if (!stop.IsCancellationRequested) log("SOCKS 수신 종료"); }
     }
     async Task Handle(TcpClient client) {
@@ -35,9 +38,11 @@ sealed class SocksRelay(ConnectionProfile profile, Action<string> log) : IDispos
                     await Reply(stream, 0, 0, life.Token);
                     life.CancelAfter(TimeSpan.FromSeconds(120));
                     async Task Pump(Stream from, Stream to, Socket end) {
-                        byte[] bytes = new byte[65536]; int n;
-                        while ((n = await from.ReadAsync(bytes, life.Token)) > 0) { await to.WriteAsync(bytes.AsMemory(0,n), life.Token); life.CancelAfter(TimeSpan.FromSeconds(120)); }
-                        try { end.Shutdown(SocketShutdown.Send); } catch (SocketException) { }
+                        try {
+                            byte[] bytes = new byte[65536]; int n;
+                            while ((n = await from.ReadAsync(bytes, life.Token)) > 0) { await to.WriteAsync(bytes.AsMemory(0,n), life.Token); life.CancelAfter(TimeSpan.FromSeconds(120)); }
+                            try { end.Shutdown(SocketShutdown.Send); } catch (SocketException) { }
+                        } catch { life.Cancel(); throw; }
                     }
                     var upstream = phone.GetStream();
                     var up = Pump(stream, upstream, phone.Client); var down = Pump(upstream, stream, client.Client);
@@ -48,7 +53,7 @@ sealed class SocksRelay(ConnectionProfile profile, Action<string> log) : IDispos
                 } else await Reply(stream, 7, 0, life.Token);
             } catch (Exception e) when (e is IOException or SocketException or OperationCanceledException or ObjectDisposedException or FormatException) {
                 if (!stop.IsCancellationRequested && e is not OperationCanceledException) log("SOCKS 연결 종료: " + (e is IOException ? "중계 연결 또는 프로토콜 오류" : e.GetType().Name));
-            } finally { life.Cancel(); sessions.Release(); }
+            } finally { life.Cancel(); Interlocked.Decrement(ref active); sessions.Release(); }
         }
     }
     async Task<TcpClient> Connect(string host, int port, bool udp, CancellationToken ct) {
@@ -106,7 +111,7 @@ sealed class SocksRelay(ConnectionProfile profile, Action<string> log) : IDispos
         byte[] port=new byte[2]; await stream.ReadExactlyAsync(port,ct); return(host,port[0]*256+port[1]);
     }
     static Task Reply(Stream stream, byte code, int port, CancellationToken ct) => stream.WriteAsync(new byte[] {5,code,0,1,127,0,0,1,(byte)(port>>8),(byte)port},ct).AsTask();
-    public void Dispose() { stop.Cancel(); listener.Stop(); }
+    public void Dispose() { lock(lifecycle){if(state==2)return;state=2;stop.Cancel();listener.Stop();} }
     sealed class UdpFlow : IDisposable {
         readonly CancellationTokenSource life;
         readonly System.Threading.Channels.Channel<byte[]> queue = System.Threading.Channels.Channel.CreateBounded<byte[]>(new System.Threading.Channels.BoundedChannelOptions(64) { FullMode=System.Threading.Channels.BoundedChannelFullMode.DropWrite,SingleReader=true,SingleWriter=true });
@@ -128,5 +133,7 @@ sealed class SocksRelay(ConnectionProfile profile, Action<string> log) : IDispos
         public void Dispose()=>life.Cancel();
     }
 }
+
+
 
 

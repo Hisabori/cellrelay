@@ -71,3 +71,11 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Adds a global listener/startup status bar and a stop-all button that stops HTTP, fixed UDP, SOCKS5 and the VPN tunnel, or cancels pending tunnel startup.
 - VPN means the existing sing-box TUN integration forwarding whole-PC TCP/UDP/DNS through the iPhone. External OpenVPN/WireGuard profiles, ICMP, unsolicited inbound connections and an encrypted PC-iPhone VPN transport are not implemented.
 - iPhone 0.7 remains compatible. Real device routing, VPN restoration, gameplay and carrier accounting remain unverified.
+
+## 0.9.1 (PC stabilization)
+- Cancels the opposite SOCKS5 TCP pump when one direction fails, while preserving normal TCP half-close behavior.
+- Serializes listener start/disposal, rejects duplicate or post-dispose starts, and makes repeated SOCKS5/UDP disposal safe.
+- Retains ownership of the VPN engine and SOCKS listener when engine termination fails, permitting retry rather than reporting a false stop.
+- Window close cancels and awaits pending VPN startup before shutting down owned services. Failed cleanup keeps the window available. Final close is queued to avoid reentrant FormClosing.
+- Adds regression coverage for parallel disposal, pending handshakes, UDP port release, upstream TCP reset, repeated owned-process termination and a hidden WinForms close smoke check.
+- Physical iPhone/VPN restoration/gameplay/carrier accounting remain unverified.

@@ -15,10 +15,14 @@ sealed class DatagramRelay(string phoneHost, int phonePort, string token, string
     readonly System.Collections.Concurrent.ConcurrentDictionary<IPEndPoint, Channel> channels = new();
     UdpClient? socket;
     int disposed;
+    readonly object lifecycle=new();
     public int Port => ((IPEndPoint)socket!.Client.LocalEndPoint!).Port;
     public void Start() {
+        lock(lifecycle) {
+        if(disposed!=0||socket!=null)throw new InvalidOperationException("UDP relay already started or disposed");
         socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, localPort));
         _ = Receive();
+        }
     }
     async Task Receive() {
         try {
@@ -80,9 +84,10 @@ sealed class DatagramRelay(string phoneHost, int phonePort, string token, string
         if (count > 65507) throw new IOException("UDP 패킷 크기 초과");
         byte[] bytes = new byte[count]; await stream.ReadExactlyAsync(bytes, ct); return bytes;
     }
-    public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) != 0) return; shutdown.Cancel(); socket?.Dispose(); }
+    public void Dispose() { lock(lifecycle){if(disposed!=0)return;disposed=1;shutdown.Cancel();socket?.Dispose();} }
     sealed class Channel {
         public readonly System.Threading.Channels.Channel<byte[]> Queue = System.Threading.Channels.Channel.CreateBounded<byte[]>(new System.Threading.Channels.BoundedChannelOptions(32) { FullMode = System.Threading.Channels.BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = true });
     }
 }
+
 

@@ -1,4 +1,4 @@
-CellRelay 0.9 VPN 터널 (실험 기능)
+CellRelay 0.9.1 VPN 터널 (실험 기능)
 
 준비
 1. PC ZIP 전체를 새 폴더에 압축 해제하고 기존 CellRelay 창을 종료합니다.
@@ -27,6 +27,7 @@ Windows 빌드 및 로컬 회귀검사 통과: TCP 반닫힘/왕복, 동적 UDP 
 https://github.com/SagerNet/sing-box/releases/tag/v1.14.3
 https://github.com/SagerNet/sing-box/tree/v1.14.3
 CellRelay는 NVIDIA 또는 SagerNet의 공식 제품이 아닙니다.
+
 
 
 

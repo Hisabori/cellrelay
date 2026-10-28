@@ -10,6 +10,7 @@ sealed class GameModePanel : UserControl
     readonly Label readiness=new(){AutoSize=true,MaximumSize=new Size(720,0)};
     readonly CancellationTokenSource closing=new();
     CancellationTokenSource? starting;
+    Task? startup;
     SocksRelay? socks;
     Process? engine;
     readonly Action<string> log;
@@ -27,10 +28,10 @@ sealed class GameModePanel : UserControl
         panel.Controls.Add(start);panel.Controls.Add(stop);panel.Controls.Add(status);
         panel.Controls.Add(new Label {AutoSize=true,MaximumSize=new Size(720,0),Text="UDP는 PC–아이폰 사이 TCP 터널로 전달되어 지연이 증가할 수 있습니다. ICMP·외부에서 먼저 시작하는 연결은 지원하지 않습니다. 아이폰 화면을 켜 두세요. 엔진 실행 표시는 게임 접속 성공을 뜻하지 않습니다. 실제 TUN·게임·통신사 집계는 미검증입니다."});
         Controls.Add(panel);RefreshReadiness();VisibleChanged+=(_,_)=>{if(Visible)RefreshReadiness();};
-        start.Click+=async(_,_)=>await Start();
+        start.Click+=async(_,_)=>{startup=Start();await startup;};
         stop.Click+=(_,_)=>{
             if(starting!=null){starting.Cancel();stop.Enabled=false;status.Text="시작 취소 중 · 연결과 검사 프로세스를 정리합니다.";}
-            else {Cleanup();SetIdle("중지됨 · 터널 엔진 종료");}
+            else {if(Cleanup())SetIdle("중지됨 · 터널 엔진 종료");}
         };
         var timer=new System.Windows.Forms.Timer {Interval=1000};
         timer.Tick+=(_,_)=>{if(starting==null && engine is {HasExited:true}){Cleanup();SetIdle("터널 엔진 종료 · 연결 기록을 확인하세요.");}};timer.Start();
@@ -72,16 +73,23 @@ sealed class GameModePanel : UserControl
         }catch(OperationCanceledException){outcome="시작 취소됨 · 연결과 검사 프로세스 정리 완료";log("게임 모드 시작 취소");}
         catch(Exception e)when(e is IOException or FormatException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException){outcome="시작 실패: "+e.Message;log(outcome);}
         finally{
-            starting=null;if(!running)Cleanup();
-            if(!IsDisposed){status.Text=outcome;start.Enabled=!running;stop.Enabled=running;stop.Text="VPN 터널 중지";RefreshReadiness();}
+            starting=null;bool cleaned=running||Cleanup();
+            if(!IsDisposed){status.Text=cleaned?outcome:"엔진이 남아 있습니다. 중지 버튼으로 종료를 재시도하세요.";start.Enabled=!running&&cleaned;stop.Enabled=running||!cleaned;stop.Text="VPN 터널 중지";RefreshReadiness();}
         }
     }
-    public void RequestStop(){if(starting!=null){starting.Cancel();stop.Enabled=false;status.Text="시작 취소 중 · 정리합니다.";}else{Cleanup();SetIdle("중지됨 · 터널 엔진 종료");}}
+    public void RequestStop(){if(starting!=null){starting.Cancel();stop.Enabled=false;status.Text="시작 취소 중 · 정리합니다.";}else{if(Cleanup())SetIdle("중지됨 · 터널 엔진 종료");}}
     public void RequestStart(){if(Parent is TabPage page&&page.Parent is TabControl tabs)tabs.SelectedTab=page;start.PerformClick();}
     void SetIdle(string message){if(!IsDisposed){start.Enabled=true;stop.Enabled=false;stop.Text="VPN 터널 중지";status.Text=message;RefreshReadiness();}}
-    void Cleanup(){
-        if(engine!=null){try{if(!engine.HasExited){engine.Kill(entireProcessTree:true);engine.WaitForExit(5000);}}catch(InvalidOperationException){}finally{engine.Dispose();engine=null;}}
-        socks?.Dispose();socks=null;
+    public async Task<bool> StopForClose(){
+        starting?.Cancel();
+        if(startup!=null)await startup;
+        return Cleanup();
+    }
+    bool Cleanup(){
+        if(engine!=null){
+            if(!EngineProcess.TryStop(engine,out var error)){log(error);if(!IsDisposed){status.Text=error+" · 중지를 재시도하세요.";start.Enabled=false;stop.Enabled=true;}return false;}
+            engine.Dispose();engine=null;
+        }
+        socks?.Dispose();socks=null;return true;
     }
 }
-
