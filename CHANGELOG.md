@@ -79,3 +79,10 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - Window close cancels and awaits pending VPN startup before shutting down owned services. Failed cleanup keeps the window available. Final close is queued to avoid reentrant FormClosing.
 - Adds regression coverage for parallel disposal, pending handshakes, UDP port release, upstream TCP reset, repeated owned-process termination and a hidden WinForms close smoke check.
 - Physical iPhone/VPN restoration/gameplay/carrier accounting remain unverified.
+
+## 0.10.0 (PC)
+- Adds an actual UDP DNS probe through the iPhone relay to 1.1.1.1:53 (example.com A query), with an 8-second deadline, explicit stages and cancellation.
+- Validates DNS response ID, question, flags, compressed names, CNAME chain and IPv4 answer records. Rejects malformed, truncated and pointer-loop responses; never echoes raw relay errors into logs.
+- VPN startup now checks HTTPS, optional UDP/DNS, engine configuration and engine startup in four stages. UDP/DNS checking is enabled by default and may be disabled when the configured test server is blocked.
+- Standalone SOCKS5 screen adds UDP/DNS test and cancel controls; stop-all also cancels this probe. A successful test proves only the sample relay path at that time, not every UDP application, VPN interface routing or carrier accounting.
+- iPhone 0.7 remains compatible. No iPhone code changes.

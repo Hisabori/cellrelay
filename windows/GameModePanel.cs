@@ -7,6 +7,7 @@ sealed class GameModePanel : UserControl
     readonly Button start=new(){Text="VPN 터널 시작 (전체 TCP·UDP)",AutoSize=true};
     readonly Button stop=new(){Text="VPN 터널 중지",AutoSize=true,Enabled=false};
     readonly Label status=new(){Text="중지됨",AutoSize=true,MaximumSize=new Size(720,0)};
+    readonly CheckBox udpCheck=new(){Text="시작 전 UDP·DNS 검사 (1.1.1.1:53)",Checked=true,AutoSize=true};
     readonly Label readiness=new(){AutoSize=true,MaximumSize=new Size(720,0)};
     readonly CancellationTokenSource closing=new();
     CancellationTokenSource? starting;
@@ -25,6 +26,7 @@ sealed class GameModePanel : UserControl
         panel.Controls.Add(readiness);
         var ready=new Button {Text="준비 상태 새로고침",AutoSize=true};ready.Click+=(_,_)=>RefreshReadiness();panel.Controls.Add(ready);
         var pairing=new Button {Text="QR · CR1 연결 정보 등록",AutoSize=true};pairing.Click+=(_,_)=>register();panel.Controls.Add(pairing);
+        panel.Controls.Add(udpCheck);panel.Controls.Add(new Label {AutoSize=true,MaximumSize=new Size(720,0),Text="검사는 example.com DNS 질의를 아이폰으로 중계합니다. 검사 서버가 차단된 환경에서는 검사를 해제할 수 있습니다."});
         panel.Controls.Add(start);panel.Controls.Add(stop);panel.Controls.Add(status);
         panel.Controls.Add(new Label {AutoSize=true,MaximumSize=new Size(720,0),Text="UDP는 PC–아이폰 사이 TCP 터널로 전달되어 지연이 증가할 수 있습니다. ICMP·외부에서 먼저 시작하는 연결은 지원하지 않습니다. 아이폰 화면을 켜 두세요. 엔진 실행 표시는 게임 접속 성공을 뜻하지 않습니다. 실제 TUN·게임·통신사 집계는 미검증입니다."});
         Controls.Add(panel);RefreshReadiness();VisibleChanged+=(_,_)=>{if(Visible)RefreshReadiness();};
@@ -52,18 +54,21 @@ sealed class GameModePanel : UserControl
         if(!File.Exists(EnginePath)||!File.Exists(Path.Combine(Path.GetDirectoryName(EnginePath)!,"libcronet.dll"))){MessageBox.Show("GAME-MODE.txt에 따라 공식 엔진을 준비하여 Desktop/Engine 폴더에 넣으세요.");return;}
         using var attempt=CancellationTokenSource.CreateLinkedTokenSource(closing.Token);starting=attempt;
         start.Enabled=false;stop.Enabled=true;stop.Text="시작 취소";
-        bool running=false;string outcome="중지됨";
+        bool running=false;bool checkUdp=udpCheck.Checked;udpCheck.Enabled=false;string outcome="중지됨";
         try{
             var selected=profile();TunnelConfig.Create(selected.Host,1080);
-            status.Text="1/3 · 아이폰 HTTPS 경로 확인";
-            await RelayProbe.Run(selected.Host,selected.Port,selected.Token,s=>{if(!IsDisposed)status.Text="1/3 · "+s;},attempt.Token);
+            status.Text="1/4 · 아이폰 HTTPS 경로 확인";
+            await RelayProbe.Run(selected.Host,selected.Port,selected.Token,s=>{if(!IsDisposed)status.Text="1/4 · "+s;},attempt.Token);
+            attempt.Token.ThrowIfCancellationRequested();
+            if(checkUdp){status.Text="2/4 · UDP·DNS 경로 확인";var result=await DatagramProbe.Run(selected,s=>{if(!IsDisposed)status.Text="2/4 · "+s;},attempt.Token);log(result);}
+            else log("UDP·DNS 시작 전 검사 생략 · 실제 UDP 경로 미확인");
             attempt.Token.ThrowIfCancellationRequested();
             socks=new SocksRelay(selected,log);socks.Start();
             string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"CellRelay");Directory.CreateDirectory(folder);
             string config=Path.Combine(folder,"game-tunnel.json");File.WriteAllText(config,TunnelConfig.Create(selected.Host,socks.Port));
-            status.Text="2/3 · 터널 엔진 설정 검사 (최대 10초)";
+            status.Text="3/4 · 터널 엔진 설정 검사 (최대 10초)";
             await EngineProcess.Check(EngineProcess.Info(EnginePath,"check",config),attempt.Token);
-            attempt.Token.ThrowIfCancellationRequested();status.Text="3/3 · 터널 엔진 시작";
+            attempt.Token.ThrowIfCancellationRequested();status.Text="4/4 · 터널 엔진 시작";
             var launched=new Process {StartInfo=EngineProcess.Info(EnginePath,"run",config)};engine=launched;
             launched.ErrorDataReceived+=(_,e)=>{if(!string.IsNullOrWhiteSpace(e.Data))log("터널: "+e.Data);};launched.OutputDataReceived+=(_,_)=>{};
             launched.Start();launched.BeginErrorReadLine();launched.BeginOutputReadLine();
@@ -74,12 +79,12 @@ sealed class GameModePanel : UserControl
         catch(Exception e)when(e is IOException or FormatException or System.ComponentModel.Win32Exception or InvalidOperationException or UnauthorizedAccessException){outcome="시작 실패: "+e.Message;log(outcome);}
         finally{
             starting=null;bool cleaned=running||Cleanup();
-            if(!IsDisposed){status.Text=cleaned?outcome:"엔진이 남아 있습니다. 중지 버튼으로 종료를 재시도하세요.";start.Enabled=!running&&cleaned;stop.Enabled=running||!cleaned;stop.Text="VPN 터널 중지";RefreshReadiness();}
+            if(!IsDisposed){udpCheck.Enabled=!running&&cleaned;status.Text=cleaned?outcome:"엔진이 남아 있습니다. 중지 버튼으로 종료를 재시도하세요.";start.Enabled=!running&&cleaned;stop.Enabled=running||!cleaned;stop.Text="VPN 터널 중지";RefreshReadiness();}
         }
     }
     public void RequestStop(){if(starting!=null){starting.Cancel();stop.Enabled=false;status.Text="시작 취소 중 · 정리합니다.";}else{if(Cleanup())SetIdle("중지됨 · 터널 엔진 종료");}}
     public void RequestStart(){if(Parent is TabPage page&&page.Parent is TabControl tabs)tabs.SelectedTab=page;start.PerformClick();}
-    void SetIdle(string message){if(!IsDisposed){start.Enabled=true;stop.Enabled=false;stop.Text="VPN 터널 중지";status.Text=message;RefreshReadiness();}}
+    void SetIdle(string message){if(!IsDisposed){start.Enabled=true;udpCheck.Enabled=true;stop.Enabled=false;stop.Text="VPN 터널 중지";status.Text=message;RefreshReadiness();}}
     public async Task<bool> StopForClose(){
         starting?.Cancel();
         if(startup!=null)await startup;
@@ -93,3 +98,4 @@ sealed class GameModePanel : UserControl
         socks?.Dispose();socks=null;return true;
     }
 }
+

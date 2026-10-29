@@ -1,4 +1,4 @@
-# CellRelay 0.9.1 — TCP · UDP · VPN 터널
+# CellRelay 0.10 — TCP · UDP · VPN 터널
 
 아이폰 중계를 시작하고 PC의 연결 설정에서 QR 이미지/클립보드 QR/CR1 코드를 등록합니다. 연결 방식을 선택한 뒤 선택한 방식으로 연결을 누르세요. 기본 화면은 VPN 터널입니다.
 
@@ -8,6 +8,8 @@
 | TCP+UDP SOCKS5 | 앱의 SOCKS5 서버를 화면의 주소로 설정 | 앱에서 SOCKS5/UDP ASSOCIATE 지원 |
 | UDP 목적지 전달 | 고정 목적지와 로컬 포트를 설정한 뒤 앱에서 로컬 포트로 전송 | 아이폰 0.7 이상 |
 | VPN 전체 TCP/UDP | 가상 어댑터로 PC 전체 TCP/UDP와 DNS 전달 | 관리자 권한, 별도 준비한 터널 엔진 |
+
+UDP·DNS 검사: SOCKS5 화면에서 아이폰 UDP·DNS 검사를 누르면 아이폰 중계를 통해 1.1.1.1:53에 example.com 질의를 보냅니다. VPN 시작 전에도 기본 실행하며 실패하면 터널을 시작하지 않습니다. 검사 서버가 차단된 환경은 시작 전 UDP·DNS 검사 옵션을 해제할 수 있습니다. 검사는 소량의 DNS 트래픽을 발생시킵니다.
 
 상단 상태는 수신 또는 엔진 시작/실행 상태입니다. 실제 인터넷 연결 성공을 뜻하지 않습니다. 모든 연결 중지로 각 중계와 진행 중인 VPN 시작을 중지할 수 있습니다.
 
@@ -94,6 +96,7 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+
 
 
 

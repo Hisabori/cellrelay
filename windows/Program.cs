@@ -40,7 +40,7 @@ sealed class MainForm : Form
     SocksModePanel? socksMode;
     public MainForm()
     {
-        Text = "CellRelay 0.9.1 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.10 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
         var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
@@ -102,7 +102,7 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { Apply(ConnectionProfile.Parse(profileInput.Text)); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.9.1 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.10 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
@@ -292,11 +292,14 @@ static class SelfTest
             await EngineProcessTests.Run();
             await ShutdownTests.Run();
             await WindowCloseTests.Run();
-            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback; HTTPS probe rejection, TLS failure stage, cancellation and reply redaction; UDP frame boundaries/empty packet/echo; QR profile roundtrip and blank rejection; SOCKS5 TCP half-close, dynamic UDP destinations, fragment rejection, association cleanup and tunnel config; engine check failure, timeout and cancellation cleanup; repeated SOCKS/UDP disposal, stopped listener rejection, port release, pending handshake cleanup, upstream reset cleanup and hidden WinForms close smoke. iOS/device/carrier behavior NOT tested.");
+            await DatagramProbeTests.Run();
+            File.WriteAllText("self-test-result.txt", "PASS: relay; HTTP framing; authentication failure recovery; idle/stop cleanup; upload half-close; 32-session limit and restart; iOS profile import and invalid profile rejection; settings roundtrip and corrupt-file fallback; HTTPS probe rejection, TLS failure stage, cancellation and reply redaction; UDP frame boundaries/empty packet/echo; QR profile roundtrip and blank rejection; SOCKS5 TCP half-close, dynamic UDP destinations, fragment rejection, association cleanup and tunnel config; engine check failure, timeout and cancellation cleanup; repeated SOCKS/UDP disposal, stopped listener rejection, port release, pending handshake cleanup, upstream reset cleanup and hidden WinForms close smoke; UDP DNS response validation, malformed/compression-loop rejection, credential-safe failures, timeout and cancellation. iOS/device/carrier behavior NOT tested.");
         }
         finally { fake.Stop(); }
     }
 }
+
+
 
 
 
