@@ -18,11 +18,12 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: CellRelay
-        MARKETING_VERSION: '0.7.0'
-        CURRENT_PROJECT_VERSION: '9'
+        MARKETING_VERSION: '0.8.0'
+        CURRENT_PROJECT_VERSION: '10'
     info:
       path: Info.plist
       properties:
         NSBonjourServices: ['_cellrelay._tcp']
+
 
 

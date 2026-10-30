@@ -24,15 +24,16 @@ import CoreImage.CIFilterBuiltins
                         Button(relay.running ? "중지" : "중계 시작") { relay.running ? relay.stop() : relay.start() }
                         Text(relay.statistics).font(.caption.monospaced())
                         Text(relay.backgroundStatus).font(.caption)
-                        Toggle("앱 복귀 시 자동 재개", isOn: $relay.autoResume)
+                        Toggle("앱 복귀 시 자동 재개 · 설정 저장", isOn: $relay.autoResume)
+                        Text("iOS 허용 시간 동안 기존 연결만 마무리합니다. 앱을 강제 종료하거나 시스템이 종료하면 새로 열어 중계를 시작해야 합니다.").font(.caption)
                     }
                     Section("테스트 범위") {
-                        Text("PC → 아이폰 앱 → 셀룰러. 백그라운드에서는 기존 연결을 iOS가 허용한 시간 동안만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지하고 앱 복귀 시 재개합니다. 무기한 백그라운드 중계는 지원하지 않습니다.")
+                        Text("PC → 아이폰 앱 → 셀룰러. 백그라운드에서는 기존 연결을 iOS가 허용한 시간 동안만 마무리하며 새 연결은 받지 않습니다. 시간 만료 시 중지하고 설정에 따라 앱 복귀 시 재개합니다. 무기한 백그라운드 중계는 지원하지 않습니다.")
                         Text("HTTP/HTTPS TCP 프록시 및 UDP 패킷 전달 테스트용. QUIC는 UDP 전달 경로를 이용합니다. 공유 데이터 미차감은 검증되지 않았습니다.")
                         Text("신뢰하는 USB/로컬 네트워크에서만 사용하세요. 연결 키와 PC-아이폰 구간은 암호화되지 않습니다. HTTPS 내용은 원래의 TLS로 보호됩니다.")
                     }
                     Section("기록") { Text(relay.events).font(.caption.monospaced()).textSelection(.enabled) }
-                }.navigationTitle("CellRelay 0.7")
+                }.navigationTitle("CellRelay 0.8")
             }.onChange(of: phase) { value in
                 switch value {
                 case .inactive: relay.prepareForBackground()
@@ -106,7 +107,10 @@ final class Relay: ObservableObject {
         cellularMonitor.start(queue: queue)
     }
     deinit { cellularMonitor.cancel() }
-    @Published var autoResume = true
+    @Published var autoResume = UserDefaults.standard.object(forKey: "CellRelayAutoResume") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoResume, forKey: "CellRelayAutoResume") }
+    }
+    private var resumeHint: String { autoResume ? "앱을 열면 재개" : "앱에서 직접 시작" }
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var backgroundGeneration: UUID?
     private var resumeOnForeground = false
@@ -132,7 +136,7 @@ final class Relay: ObservableObject {
             guard self.isBackground else { self.endBackgroundTime(); return }
             self.note("백그라운드 허용 시간 만료 · 기존 연결 정리")
             self.stop(resumeWhenActive: self.autoResume)
-            self.backgroundStatus = "시간 만료 · 앱을 열면 재개"
+            self.backgroundStatus = "시간 만료 · \(self.resumeHint)"
         }
     }
     func enterBackground() {
@@ -140,7 +144,7 @@ final class Relay: ObservableObject {
         guard running else { return }
         prepareForBackground()
         guard backgroundTask != .invalid else {
-            stop(resumeWhenActive: autoResume); backgroundStatus = "백그라운드 실행 시간이 허용되지 않음"; return
+            stop(resumeWhenActive: autoResume); backgroundStatus = "백그라운드 시간 미허용 · \(resumeHint)"; return
         }
         backgroundStatus = "백그라운드 · 기존 연결만 마무리 중"
         queue.async { self.queueIsBackground = true }
@@ -206,7 +210,7 @@ final class Relay: ObservableObject {
                         guard let self, self.runID == currentRun else { return }
                         self.statistics = summary
                         if refreshAddress && !self.isBackground { self.refreshAddresses() }
-                        if drained && self.isBackground { self.stop(resumeWhenActive: self.autoResume); self.backgroundStatus = "기존 연결 완료 · 앱을 열면 재개" }
+                        if drained && self.isBackground { self.stop(resumeWhenActive: self.autoResume); self.backgroundStatus = "기존 연결 완료 · \(self.resumeHint)" }
                         else if self.isBackground {
                             let remaining = UIApplication.shared.backgroundTimeRemaining
                             self.backgroundStatus = remaining.isFinite && remaining < 86400 ? "백그라운드 · 남은 시간 약 \(Int(max(0, remaining)))초" : "백그라운드 · iOS 허용 시간 내 연결 마무리"
@@ -414,6 +418,7 @@ private final class Session {
         client.cancel(); upstream?.cancel(); ended()
     }
 }
+
 
 
 

@@ -29,7 +29,7 @@ sealed record ConnectionProfile(string Host, string Token, int Port = 49152)
     }
 }
 
-sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877, int PhonePort = 49152)
+sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877, int PhonePort = 49152, bool CloseToTray = true)
 {
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CellRelay", "settings.json");
     public static AppSettings Load(string path)
@@ -49,3 +49,4 @@ sealed record AppSettings(string Host = "172.20.10.1", int ProxyPort = 8877, int
         File.Move(temp, path, true);
     }
 }
+

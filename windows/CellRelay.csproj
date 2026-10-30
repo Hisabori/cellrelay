@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><Version>0.10.0</Version><FileVersion>0.10.0.0</FileVersion></PropertyGroup>
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><Version>0.11.0</Version><FileVersion>0.11.0.0</FileVersion></PropertyGroup>
 <ItemGroup><PackageReference Include="ZXing.Net.Bindings.Windows.Compatibility" Version="0.16.16" /></ItemGroup></Project>
+
 
 
 

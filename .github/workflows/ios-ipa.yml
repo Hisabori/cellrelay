@@ -58,7 +58,7 @@ jobs:
               assert '_cellrelay._tcp' in info['NSBonjourServices']
               assert info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
               assert prefix + 'embedded.mobileprovision' not in z.namelist(), 'Expected unsigned IPA'
-              result = {'file': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'bundle_id': info['CFBundleIdentifier'], 'minimum_ios': info['MinimumOSVersion'], 'architecture': 'arm64', 'unsigned': True, 'device_installation_tested': False, 'carrier_accounting_tested': False}
+              result = {'file': path.name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'bundle_id': info['CFBundleIdentifier'], 'version': info.get('CFBundleShortVersionString'), 'build': info.get('CFBundleVersion'), 'minimum_ios': info['MinimumOSVersion'], 'architecture': 'arm64', 'unsigned': True, 'device_installation_tested': False, 'carrier_accounting_tested': False}
           Path('ios/build/IPA-validation.json').write_text(json.dumps(result, indent=2) + '\n')
           print(json.dumps(result, indent=2))
           PY
@@ -70,4 +70,5 @@ jobs:
             ios/build/IPA-validation.json
           if-no-files-found: error
           retention-days: 14
+
 

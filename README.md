@@ -1,4 +1,4 @@
-# CellRelay 0.10 — TCP · UDP · VPN 터널
+# CellRelay 0.11 — TCP · UDP · VPN 터널
 
 아이폰 중계를 시작하고 PC의 연결 설정에서 QR 이미지/클립보드 QR/CR1 코드를 등록합니다. 연결 방식을 선택한 뒤 선택한 방식으로 연결을 누르세요. 기본 화면은 VPN 터널입니다.
 
@@ -11,11 +11,13 @@
 
 UDP·DNS 검사: SOCKS5 화면에서 아이폰 UDP·DNS 검사를 누르면 아이폰 중계를 통해 1.1.1.1:53에 example.com 질의를 보냅니다. VPN 시작 전에도 기본 실행하며 실패하면 터널을 시작하지 않습니다. 검사 서버가 차단된 환경은 시작 전 UDP·DNS 검사 옵션을 해제할 수 있습니다. 검사는 소량의 DNS 트래픽을 발생시킵니다.
 
+PC 백그라운드: 창 닫아도 트레이에서 계속 실행 옵션이 기본 활성화됩니다. 창 닫기 또는 백그라운드로 보내기는 중계를 유지하며, 트레이 메뉴에서 창 열기·모든 연결 중지·완전 종료를 선택할 수 있습니다. 완전 종료는 터널 엔진과 연결을 정리합니다. 절전·PC 종료 상태에서는 중계를 유지하지 않습니다.
+
 상단 상태는 수신 또는 엔진 시작/실행 상태입니다. 실제 인터넷 연결 성공을 뜻하지 않습니다. 모든 연결 중지로 각 중계와 진행 중인 VPN 시작을 중지할 수 있습니다.
 
 VPN은 아이폰 중계로 보내는 기존 TUN 모드입니다. 외부 WireGuard/OpenVPN 프로필 연결, ICMP 및 외부에서 먼저 시작하는 연결은 지원하지 않습니다. PC-아이폰 구간은 암호화된 VPN 전송을 제공하지 않으며 HTTPS 자체의 TLS는 유지됩니다. UDP는 이 구간에서 TCP 터널로 전달되어 지연이 증가할 수 있습니다.
 
-QR에는 연결 키가 포함됩니다. 카메라 스캔 대신 QR 이미지 파일 또는 클립보드 이미지를 로컬에서 읽습니다. 통신사 공유 데이터 미차감과 실제 게임·VPN 동작은 미검증입니다. 아이폰은 0.7을 계속 사용합니다.
+QR에는 연결 키가 포함됩니다. 카메라 스캔 대신 QR 이미지 파일 또는 클립보드 이미지를 로컬에서 읽습니다. 통신사 공유 데이터 미차감과 실제 게임·VPN 동작은 미검증입니다. 기존 아이폰 0.7과 호환되며 새 0.8은 자동 재개 설정 저장과 백그라운드 상태 안내를 개선합니다.
 
 Windows HTTP/HTTPS 프록시 → 로컬 TCP 연결 → 아이폰 앱 → 셀룰러 TCP 연결.
 아이폰의 출구는 Network.framework의 `requiredInterfaceType = .cellular`로 제한합니다. 셀룰러 경로가 없으면 연결 실패하며 PC에서 직접 인터넷으로 우회하지 않습니다.
@@ -96,6 +98,7 @@ Windows: `dotnet publish windows/CellRelay.csproj -c Release -r win-x64 --self-c
 자체 시험: `Desktop/CellRelay.exe --self-test` — 실행한 현재 폴더에 `self-test-result.txt`를 기록하고 실패 시 종료 코드 1을 반환합니다.
 
 Apple 참고: https://developer.apple.com/documentation/network/nwparameters , https://developer.apple.com/documentation/network/nwlistener , https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app
+
 
 
 

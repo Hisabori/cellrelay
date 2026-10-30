@@ -31,6 +31,13 @@ sealed class MainForm : Form
     readonly Label proxyHint = new() { AutoSize = true };
     readonly Label phoneStatus = new() { AutoSize = true, Text = "아이폰 연결: 아직 검사하지 않음" };
     readonly CancellationTokenSource closing = new();
+    readonly CheckBox closeToTray=new(){Text="창 닫아도 트레이에서 계속 실행",AutoSize=true};
+    readonly NotifyIcon tray=new(){Icon=SystemIcons.Application,Text="CellRelay · 대기"};
+    bool exitRequested;
+    internal bool IsInBackground=>!Visible&&tray.Visible;
+    internal void RestoreFromBackground(){ShowInTaskbar=true;Show();WindowState=FormWindowState.Normal;Activate();}
+    internal void ExitApplication(){exitRequested=true;Close();}
+    void SendToBackground(){closeToTray.Checked=true;tray.Visible=true;ShowInTaskbar=false;Hide();}
     long lastUp, lastDown;
     readonly Label statistics = new() { AutoSize = true, MaximumSize = new Size(710, 0), Text = "대기 중" };
     readonly System.Windows.Forms.Timer refresh = new() { Interval = 1000 };
@@ -38,11 +45,11 @@ sealed class MainForm : Form
     DatagramRelay? datagrams;
     GameModePanel? game;
     SocksModePanel? socksMode;
-    public MainForm()
+    public MainForm(bool enableTray=true,bool persistSettings=true)
     {
-        Text = "CellRelay 0.10 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
+        Text = "CellRelay 0.11 · PC 연결 관리자"; Width = 900; Height = 780; MinimumSize = new Size(800, 650);
         Font = new Font("Malgun Gothic", 9F); BackColor = Color.White;
-        var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;
+        var saved = AppSettings.Load(AppSettings.DefaultPath); host.Text = saved.Host; proxyPort.Value = saved.ProxyPort; phonePort.Value = saved.PhonePort;closeToTray.Checked=enableTray&&(!persistSettings||saved.CloseToTray);tray.Visible=closeToTray.Checked;
         var panel = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 440, AutoScroll = true, Padding = new Padding(16), FlowDirection = FlowDirection.TopDown, WrapContents = false };
         panel.Controls.Add(new Label { Text = "CellRelay · 아이폰 셀룰러 연결", Font = new Font(Font.FontFamily, 15F, FontStyle.Bold), AutoSize = true });
         panel.Controls.Add(new Label { Text = "① 아이폰 중계 시작 → ② QR·CR1 등록 → ③ 연결 방식 선택 → 연결", AutoSize = true, Margin = new Padding(3, 8, 3, 12) });
@@ -102,7 +109,7 @@ sealed class MainForm : Form
         copyProxy.Click += (_, _) => { try { Clipboard.SetText($"127.0.0.1:{proxyPort.Value}"); } catch (System.Runtime.InteropServices.ExternalException) { Log("다른 프로그램이 클립보드를 사용 중입니다."); } };
         clear.Click += (_, _) => log.Clear();
         import.Click += (_, _) => { try { Apply(ConnectionProfile.Parse(profileInput.Text)); } catch (FormatException e) { MessageBox.Show(e.Message); } };
-        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.10 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
+        export.Click += (_, _) => { using var picker = new SaveFileDialog { Filter = "진단 기록 (*.txt)|*.txt", FileName = "CellRelay-diagnostics.txt" }; if (picker.ShowDialog() != DialogResult.OK) return; try { File.WriteAllText(picker.FileName, $"CellRelay 0.11 · {DateTimeOffset.Now:O}\r\n{statistics.Text}\r\n현재 연결 키와 연결 코드를 가립니다. 목적지 호스트가 기록에 포함될 수 있습니다.\r\n\r\n" + Diagnostics.Redact(log.Text, token.Text.Trim())); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("저장 실패: " + e.Message); } };
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var logTab = new TabPage("연결 기록"); logTab.Controls.Add(log);
         var guideTab = new TabPage("사용 안내 · 백그라운드");
@@ -129,7 +136,8 @@ sealed class MainForm : Form
                 udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = false; udpStop.Enabled = true;
             } catch (Exception e) when (e is SocketException or IOException) { datagrams?.Dispose(); datagrams = null; udpStatus.Text = "시작 실패: " + e.Message; }
         };
-        udpStop.Click += (_, _) => { datagrams?.Dispose(); datagrams = null; udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = true; udpStop.Enabled = false; udpStatus.Text = "중지됨"; };
+        void StopUdp() { datagrams?.Dispose(); datagrams = null; udpStart.Enabled = destination.Enabled = destinationPort.Enabled = localUdp.Enabled = true; udpStop.Enabled = false; udpStatus.Text = "중지됨"; }
+        udpStop.Click+=(_,_)=>StopUdp();
         var gameTab=new TabPage("VPN · 전체 TCP/UDP");
         game=new GameModePanel(()=> {
             if(token.Text.Trim().Length!=32 || !token.Text.Trim().All(Uri.IsHexDigit))throw new FormatException("QR 또는 CR1 연결 정보를 먼저 등록하세요.");
@@ -145,18 +153,28 @@ sealed class MainForm : Form
         var stopAll=new Button {Text="모든 연결 중지",AutoSize=true};
         var modesStatus=new Label {AutoSize=true,MaximumSize=new Size(710,0)};
         var bar=new FlowLayoutPanel {Dock=DockStyle.Top,AutoSize=true,Padding=new Padding(8)};bar.Controls.Add(stopAll);bar.Controls.Add(modesStatus);
-        stopAll.Click+=(_,_)=>{Stop();if(udpStop.Enabled)udpStop.PerformClick();socksMode.RequestStop();game.RequestStop();};
+        void StopEverything(){Stop();StopUdp();socksMode.RequestStop();game.RequestStop();}
+        stopAll.Click+=(_,_)=>StopEverything();
+        var hide=new Button {Text="백그라운드로 보내기",AutoSize=true};hide.Click+=(_,_)=>SendToBackground();bar.Controls.Add(closeToTray);bar.Controls.Add(hide);
+        var trayMenu=new ContextMenuStrip();trayMenu.Items.Add("창 열기",null,(_,_)=>RestoreFromBackground());trayMenu.Items.Add("모든 연결 중지",null,(_,_)=>StopEverything());trayMenu.Items.Add("완전 종료",null,(_,_)=>ExitApplication());tray.ContextMenuStrip=trayMenu;tray.DoubleClick+=(_,_)=>RestoreFromBackground();
+        closeToTray.CheckedChanged+=(_,_)=>{
+            tray.Visible=closeToTray.Checked;if(!closeToTray.Checked&&!Visible)RestoreFromBackground();
+            if(persistSettings)try{(AppSettings.Load(AppSettings.DefaultPath) with {CloseToTray=closeToTray.Checked}).Save(AppSettings.DefaultPath);}catch(Exception error)when(error is IOException or UnauthorizedAccessException){Log("백그라운드 설정 저장 실패");}
+        };
+        Disposed+=(_,_)=>{tray.Visible=false;tray.Dispose();trayMenu.Dispose();};
         Controls.Add(bar);
         tabs.TabPages.AddRange([connectionTab, gameTab, socksTab, udpTab, logTab, guideTab]); Controls.Add(tabs);bar.BringToFront(); tabs.SelectedTab=gameTab;
         start.Click += (_, _) => {
             if (token.Text.Trim().Length != 32 || !token.Text.Trim().All(Uri.IsHexDigit) || Uri.CheckHostName(host.Text.Trim()) == UriHostNameType.Unknown) { MessageBox.Show("아이폰 주소와 앱에 표시된 32자리 연결 키를 입력하세요. 주소에는 http:// 또는 포트를 넣지 마세요."); return; }
-            try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
+            try { int requestedPort = (int)proxyPort.Value; proxy = ProxyStarter.Start(host.Text.Trim(), token.Text.Trim(), requestedPort, Log, (int)phonePort.Value); proxyPort.Value = proxy.Port; if (proxy.Port != requestedPort) { proxyHint.ForeColor = Color.Firebrick; proxyHint.Font = new Font(Font, FontStyle.Bold); } else { proxyHint.ForeColor = SystemColors.ControlText; proxyHint.Font = Font; } lastUp = lastDown = 0; start.Enabled = false; stop.Enabled = true; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = false; try { new AppSettings(host.Text.Trim(), (int)proxyPort.Value, (int)phonePort.Value,closeToTray.Checked).Save(AppSettings.DefaultPath); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log("설정 저장 실패: " + e.Message); } Log("PC 수신 시작: 127.0.0.1:" + proxy.Port + " · 브라우저에도 같은 포트를 설정하세요. 공유 데이터 미차감은 미검증입니다."); }
             catch (Exception e) { proxy?.Dispose(); proxy = null; Log(e.Message); }
         };
         stop.Click += (_, _) => Stop();
         bool closePending=false,allowClose=false;
         FormClosing += async (_, e) => {
-            if(allowClose)return;e.Cancel=true;if(closePending)return;closePending=true;
+            if(allowClose)return;
+            if(!exitRequested&&closeToTray.Checked&&e.CloseReason==CloseReason.UserClosing){e.Cancel=true;SendToBackground();return;}
+            e.Cancel=true;if(closePending)return;closePending=true;
             try{
                 if(!await game.StopForClose()){MessageBox.Show("터널 엔진을 종료하지 못해 창을 유지합니다. 중지 버튼으로 다시 시도하세요.");return;}
                 closing.Cancel();socksMode.RequestStop();datagrams?.Dispose();refresh.Stop();refresh.Dispose();proxy?.Dispose();allowClose=true;BeginInvoke(new Action(Close));
@@ -174,7 +192,7 @@ sealed class MainForm : Form
             catch (IOException e) { if (!IsDisposed) phoneStatus.Text = "검사 실패: " + e.Message; Log("검사 실패: " + e.Message); }
             finally { if (!IsDisposed) diagnose.Enabled = true; }
         };
-        refresh.Tick += (_, _) => { modesStatus.Text=$"TCP {(proxy!=null?"수신 중":"중지")} · UDP {(datagrams!=null?"수신 중":"중지")} · SOCKS5 {(socksMode.Active?"수신 중":"중지")} · VPN {(game.Active?"시작/실행 중":"중지")}"; if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
+        refresh.Tick += (_, _) => { tray.Text=(proxy!=null||datagrams!=null||socksMode.Active||game.Active)?"CellRelay · 중계 수신/실행 중":"CellRelay · 대기"; modesStatus.Text=$"TCP {(proxy!=null?"수신 중":"중지")} · UDP {(datagrams!=null?"수신 중":"중지")} · SOCKS5 {(socksMode.Active?"수신 중":"중지")} · VPN {(game.Active?"시작/실행 중":"중지")}"; if (proxy is { } current) { var up = current.Uploaded; var down = current.Downloaded; statistics.Text = current.Summary + $" · ↑{Math.Max(0, up-lastUp):N0} ↓{Math.Max(0, down-lastDown):N0} B/초(약)"; lastUp = up; lastDown = down; } }; refresh.Start();
     }
     void Stop() { var final = proxy?.Summary; proxy?.Dispose(); proxy = null; start.Enabled = true; stop.Enabled = false; host.Enabled = token.Enabled = phonePort.Enabled = proxyPort.Enabled = import.Enabled = profileInput.Enabled = true; statistics.Text = "중지됨"; Log("중지됨 · " + final); }
     void Log(string s) { if (IsDisposed || !IsHandleCreated) return; try { BeginInvoke(new Action(() => { if (IsDisposed) return; if (log.TextLength > 32000) log.Text = log.Text[^16000..]; log.AppendText($"{DateTime.Now:HH:mm:ss} {s}\r\n"); })); } catch (InvalidOperationException) { } }
@@ -298,6 +316,7 @@ static class SelfTest
         finally { fake.Stop(); }
     }
 }
+
 
 
 

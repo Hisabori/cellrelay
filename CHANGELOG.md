@@ -86,3 +86,10 @@ iOS 컴파일·IPA 생성·실제 기기 동작·공유 데이터 미차감은 �
 - VPN startup now checks HTTPS, optional UDP/DNS, engine configuration and engine startup in four stages. UDP/DNS checking is enabled by default and may be disabled when the configured test server is blocked.
 - Standalone SOCKS5 screen adds UDP/DNS test and cancel controls; stop-all also cancels this probe. A successful test proves only the sample relay path at that time, not every UDP application, VPN interface routing or carrier accounting.
 - iPhone 0.7 remains compatible. No iPhone code changes.
+
+## 0.11.0 (PC) / 0.8.0 (iPhone)
+- PC close-to-tray background mode is enabled by default, with a persistent preference and an explicit background button. Tray menu supports restore, stop-all and full exit. Full exit keeps the owned-engine cleanup sequence.
+- Stop-all uses direct stop actions even when their tabs or the main window are hidden.
+- Adds hidden WinForms smoke tests for close-to-tray, restore and explicit exit, plus tray-preference migration/persistence checks. Tests do not overwrite the user's settings.
+- iPhone persists the foreground-auto-resume preference and uses accurate manual/automatic restart hints after background completion/expiration. The existing iOS background time limit remains unchanged: existing connections only, no indefinite background listener, no automatic restart after force-quit or OS termination.
+- PC sleep/shutdown and physical iPhone/VPN/gameplay/carrier behavior remain outside the verified boundary.

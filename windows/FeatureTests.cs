@@ -33,6 +33,9 @@ static class FeatureTests
         if (AppSettings.Load(path).PhonePort != 49152) throw new Exception("Old settings migration failed");
         File.WriteAllText(path, "{broken");
         if (AppSettings.Load(path) != new AppSettings()) throw new Exception("Corrupt settings fallback failed");
+        new AppSettings(CloseToTray:false).Save(path);if(AppSettings.Load(path).CloseToTray)throw new Exception("Tray preference persistence failed");
+        File.WriteAllText(path,"{\"Host\":\"192.168.1.2\",\"ProxyPort\":8877}");if(!AppSettings.Load(path).CloseToTray)throw new Exception("Legacy tray preference default failed");
         new AppSettings().Save(path);
     }
 }
+
